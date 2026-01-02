@@ -1,16 +1,31 @@
 package config
 
-import "os"
+import (
+	"log"
+	"os"
+	"strings"
+)
 
 // Config holds application configuration.
 type Config struct {
-	Port string
+	Port        string
+	DatabaseURL string
+	Env         string
 }
 
 // Load reads configuration from environment variables.
 func Load() Config {
+	env := normalizeEnv(getEnv("ENV", "development"))
+	dbURL := os.Getenv("DATABASE_URL")
+
+	if env == "production" && dbURL == "" {
+		log.Fatal("DATABASE_URL is required in production")
+	}
+
 	return Config{
-		Port: getEnv("PORT", "8080"),
+		Port:        getEnv("PORT", "8080"),
+		DatabaseURL: dbURL,
+		Env:         env,
 	}
 }
 
@@ -19,4 +34,15 @@ func getEnv(key, def string) string {
 		return val
 	}
 	return def
+}
+
+func normalizeEnv(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "production", "prod":
+		return "production"
+	case "staging":
+		return "staging"
+	default:
+		return "development"
+	}
 }

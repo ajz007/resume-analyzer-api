@@ -1,3 +1,4 @@
 .env
 .env.local
 cmd/.env
+data/
