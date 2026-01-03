@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const requestIDKey = "requestId"
@@ -36,6 +37,10 @@ func RequestIDFromContext(c *gin.Context) string {
 }
 
 func generateRequestID() string {
+	// Prefer uuid for readability; fall back to random/ts.
+	if u, err := uuid.NewRandom(); err == nil {
+		return u.String()
+	}
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return time.Now().UTC().Format("20060102150405.000000000")

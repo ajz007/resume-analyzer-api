@@ -1,12 +1,13 @@
 package middleware
 
 import (
-	"log"
 	"net/http"
+	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
 
 	"resume-backend/internal/shared/server/respond"
+	"resume-backend/internal/shared/telemetry"
 )
 
 // Recovery recovers from panics and returns a standardized error response.
@@ -15,8 +16,14 @@ func Recovery() gin.HandlerFunc {
 		defer func() {
 			if rec := recover(); rec != nil {
 				reqID := RequestIDFromContext(c)
-				log.Printf("panic req_id=%s err=%v", reqID, rec)
-				respond.Error(c, http.StatusInternalServerError, "internal_error", "internal server error", nil)
+				telemetry.Error("panic", map[string]any{
+					"request_id": reqID,
+					"error":      rec,
+					"stack":      string(debug.Stack()),
+					"path":       c.Request.URL.Path,
+					"method":     c.Request.Method,
+				})
+				respond.Error(c, http.StatusInternalServerError, "internal", "Unexpected server error", nil)
 				c.Abort()
 			}
 		}()

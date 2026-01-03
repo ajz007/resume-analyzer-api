@@ -6,4 +6,6 @@ import "context"
 type DocumentsRepo interface {
 	Create(ctx context.Context, doc Document) error
 	GetCurrentByUser(ctx context.Context, userId string) (Document, error)
+	ListByUser(ctx context.Context, userId string, limit, offset int) ([]Document, error)
+	GetByID(ctx context.Context, userId, documentID string) (Document, error)
 }

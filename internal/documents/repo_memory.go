@@ -2,19 +2,20 @@ package documents
 
 import (
 	"context"
+	"sort"
 	"sync"
 )
 
 // MemoryRepo is an in-memory implementation of DocumentsRepo.
 type MemoryRepo struct {
 	mu   sync.RWMutex
-	data map[string]Document // userId -> current document
+	data map[string][]Document // userId -> documents
 }
 
 // NewMemoryRepo constructs a MemoryRepo.
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		data: make(map[string]Document),
+		data: make(map[string][]Document),
 	}
 }
 
@@ -25,7 +26,7 @@ func (r *MemoryRepo) Create(ctx context.Context, doc Document) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.data[doc.UserID] = doc
+	r.data[doc.UserID] = append(r.data[doc.UserID], doc)
 	return nil
 }
 
@@ -36,9 +37,61 @@ func (r *MemoryRepo) GetCurrentByUser(ctx context.Context, userId string) (Docum
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	doc, ok := r.data[userId]
-	if !ok {
+	docs, ok := r.data[userId]
+	if !ok || len(docs) == 0 {
 		return Document{}, ErrNotFound
 	}
-	return doc, nil
+	return docs[len(docs)-1], nil
+}
+
+// GetByID returns a document by ID for a user.
+func (r *MemoryRepo) GetByID(ctx context.Context, userId, documentID string) (Document, error) {
+	if err := ctx.Err(); err != nil {
+		return Document{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	docs := r.data[userId]
+	for i := range docs {
+		if docs[i].ID == documentID {
+			return docs[i], nil
+		}
+	}
+	return Document{}, ErrNotFound
+}
+
+// ListByUser returns documents for a user, newest first, honoring limit/offset.
+func (r *MemoryRepo) ListByUser(ctx context.Context, userId string, limit, offset int) ([]Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = 0
+	}
+
+	r.mu.RLock()
+	userDocs := r.data[userId]
+	r.mu.RUnlock()
+
+	if len(userDocs) == 0 || offset >= len(userDocs) {
+		return []Document{}, nil
+	}
+
+	// Copy and sort newest-first by CreatedAt.
+	docs := make([]Document, len(userDocs))
+	copy(docs, userDocs)
+	sort.Slice(docs, func(i, j int) bool {
+		return docs[i].CreatedAt.After(docs[j].CreatedAt)
+	})
+
+	end := len(docs)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+
+	return docs[offset:end], nil
 }

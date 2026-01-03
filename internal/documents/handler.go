@@ -3,6 +3,7 @@ package documents
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,6 +27,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/documents", h.upload)
 	rg.GET("/documents/current", h.current)
+	rg.GET("/documents", h.list)
 }
 
 func (h *Handler) upload(c *gin.Context) {
@@ -51,7 +53,7 @@ func (h *Handler) upload(c *gin.Context) {
 		case errors.Is(err, ErrInvalidInput):
 			respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
 		default:
-			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to upload document", nil)
+			respond.Error(c, http.StatusInternalServerError, "failed to upload document", err.Error(), nil)
 		}
 		return
 	}
@@ -76,4 +78,63 @@ func (h *Handler) current(c *gin.Context) {
 	}
 
 	respond.JSON(c, http.StatusOK, toResponse(doc))
+}
+
+func (h *Handler) list(c *gin.Context) {
+	if isGuest, ok := c.Get("isGuest"); ok {
+		if guest, ok2 := isGuest.(bool); ok2 && guest {
+			respond.Error(c, http.StatusUnauthorized, "login_required", "Login required to view history", nil)
+			return
+		}
+	}
+
+	userID := middleware.UserIDFromContext(c)
+
+	limit := 20
+	offset := 0
+
+	if v := c.Query("limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			limit = parsed
+		}
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	if v := c.Query("offset"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			offset = parsed
+		}
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	docs, err := h.Svc.List(c.Request.Context(), userID, limit, offset)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
+		default:
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to list documents", nil)
+		}
+		return
+	}
+
+	resp := make([]gin.H, 0, len(docs))
+	for _, doc := range docs {
+		resp = append(resp, gin.H{
+			"documentId": doc.ID,
+			"fileName":   doc.FileName,
+			"mimeType":   doc.MimeType,
+			"sizeBytes":  doc.SizeBytes,
+			"uploadedAt": doc.CreatedAt,
+		})
+	}
+
+	respond.JSON(c, http.StatusOK, resp)
 }

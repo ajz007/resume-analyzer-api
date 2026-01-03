@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,8 @@ func (s *Service) Upload(ctx context.Context, userId, fileName string, r io.Read
 		CreatedAt:  time.Now().UTC(),
 	}
 
+	log.Printf("Uploaded document %s for user %s: size=%d mime=%s", doc.ID, userId, size, mimeType)
+
 	if err := s.Repo.Create(ctx, doc); err != nil {
 		return Document{}, err
 	}
@@ -51,4 +54,12 @@ func (s *Service) Current(ctx context.Context, userId string) (Document, error) 
 		return Document{}, errors.New("user id required")
 	}
 	return s.Repo.GetCurrentByUser(ctx, userId)
+}
+
+// List returns a user's documents ordered newest-first with limit/offset.
+func (s *Service) List(ctx context.Context, userId string, limit, offset int) ([]Document, error) {
+	if userId == "" {
+		return nil, errors.New("user id required")
+	}
+	return s.Repo.ListByUser(ctx, userId, limit, offset)
 }

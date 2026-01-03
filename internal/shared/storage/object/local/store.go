@@ -28,14 +28,12 @@ func New(baseDir string) object.ObjectStore {
 
 // Save writes the reader to disk under the user's namespace with a random prefix.
 func (s *Store) Save(ctx context.Context, userId string, fileName string, r io.Reader) (string, int64, string, error) {
-	sanitizedUser, err := util.SanitizeFileName(userId)
-	if err != nil {
-		return "", 0, "", fmt.Errorf("sanitize user id: %w", err)
-	}
 	sanitizedName, err := util.SanitizeFileName(fileName)
 	if err != nil {
 		return "", 0, "", fmt.Errorf("sanitize file name: %w", err)
 	}
+
+	storageUserKey := util.HashUserKey(userId)
 
 	if err := ctx.Err(); err != nil {
 		return "", 0, "", err
@@ -44,7 +42,7 @@ func (s *Store) Save(ctx context.Context, userId string, fileName string, r io.R
 	prefix := randomID()
 	finalName := fmt.Sprintf("%s_%s", prefix, sanitizedName)
 
-	dirPath := filepath.Join(s.baseDir, sanitizedUser)
+	dirPath := filepath.Join(s.baseDir, storageUserKey)
 	if err := os.MkdirAll(dirPath, 0o755); err != nil {
 		return "", 0, "", fmt.Errorf("mkdir: %w", err)
 	}
@@ -78,7 +76,7 @@ func (s *Store) Save(ctx context.Context, userId string, fileName string, r io.R
 	}
 	size += written
 
-	relPath := filepath.Join(sanitizedUser, finalName)
+	relPath := filepath.Join(storageUserKey, finalName)
 	return relPath, size, mimeType, nil
 }
 

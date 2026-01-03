@@ -8,16 +8,23 @@ import (
 
 // Config holds application configuration.
 type Config struct {
-	Port            string
-	CORSAllowOrigin []string
-	LocalStoreDir   string
-	DatabaseURL     string
-	Env             string
+	Port               string
+	CORSAllowOrigin    []string
+	LocalStoreDir      string
+	DatabaseURL        string
+	Env                string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
+	UIRedirectURL      string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
 func Load() Config {
-	env := normalizeEnv(getEnv("ENV", "development"))
+	// Best-effort load of local env files for dev convenience.
+	loadEnvFiles(".env", "cmd/.env")
+
+	env := normalizeEnv(getEnv("ENV", "dev"))
 	dbURL := os.Getenv("DATABASE_URL")
 
 	if env == "production" && dbURL == "" {
@@ -25,11 +32,15 @@ func Load() Config {
 	}
 
 	return Config{
-		Port:            getEnv("PORT", "8080"),
-		CORSAllowOrigin: splitAndTrim(getEnv("CORS_ALLOW_ORIGINS", "http://localhost:5173")),
-		LocalStoreDir:   getEnv("LOCAL_STORE_DIR", "./data"),
-		DatabaseURL:     dbURL,
-		Env:             env,
+		Port:               getEnv("PORT", "8080"),
+		CORSAllowOrigin:    splitAndTrim(getEnv("CORS_ALLOW_ORIGINS", "http://localhost:5173")),
+		LocalStoreDir:      getEnv("LOCAL_STORE_DIR", "./data"),
+		DatabaseURL:        dbURL,
+		Env:                env,
+		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
+		UIRedirectURL:      getEnv("UI_REDIRECT_URL", ""),
 	}
 }
 
@@ -57,7 +68,9 @@ func normalizeEnv(raw string) string {
 		return "production"
 	case "staging":
 		return "staging"
+	case "development", "dev":
+		return "dev"
 	default:
-		return "development"
+		return "dev"
 	}
 }
