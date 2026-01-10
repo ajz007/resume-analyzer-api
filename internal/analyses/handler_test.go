@@ -50,8 +50,8 @@ func TestStartAnalysisDefaults(t *testing.T) {
 	if analysis.JobDescription != "" {
 		t.Fatalf("expected empty jobDescription, got %q", analysis.JobDescription)
 	}
-	if analysis.PromptVersion != "v1" {
-		t.Fatalf("expected promptVersion v1, got %q", analysis.PromptVersion)
+	if analysis.PromptVersion != "v2_1" {
+		t.Fatalf("expected promptVersion v2_1, got %q", analysis.PromptVersion)
 	}
 }
 

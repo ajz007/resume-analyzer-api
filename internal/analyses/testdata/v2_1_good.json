@@ -1,0 +1,58 @@
+{
+  "meta": {
+    "promptVersion": "v2_1",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.6,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {
+    "overallAssessment": "ok",
+    "strengths": [],
+    "weaknesses": []
+  },
+  "ats": {
+    "score": 80,
+    "scoreBreakdown": {
+      "skills": 20,
+      "experience": 20,
+      "impact": 20,
+      "formatting": 20,
+      "roleFit": 20
+    },
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": ["crm"]
+    },
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "low",
+      "section": "Summary",
+      "problem": "Vague statement",
+      "whyItMatters": "Clarity matters",
+      "suggestion": "Add metrics",
+      "evidence": "notFound",
+      "fixEffort": "5min",
+      "priority": 1
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Experience",
+      "before": "Improved sales.",
+      "after": "Improved sales by X%.",
+      "rationale": "Adds impact.",
+      "metricsSource": "placeholder",
+      "placeholdersNeeded": ["percentage increase"]
+    }
+  ],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "promptVersion": "v2_2",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.6,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {
+    "overallAssessment": "ok",
+    "strengths": [],
+    "weaknesses": []
+  },
+  "ats": {
+    "score": 80,
+    "scoreBreakdown": {
+      "skills": 20,
+      "experience": 20,
+      "impact": 20,
+      "formatting": 20,
+      "roleFit": 20
+    },
+    "scoreReasoning": [
+      "Skills are solid.",
+      "Experience is consistent.",
+      "Formatting is acceptable."
+    ],
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": []
+    },
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "low",
+      "section": "Contact",
+      "problem": "Missing email",
+      "whyItMatters": "Cannot contact",
+      "suggestion": "Add email",
+      "evidence": "notFound",
+      "fixEffort": "5min",
+      "priority": 2,
+      "autoFixable": true,
+      "requiresUserInput": ["email"]
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Experience",
+      "before": "Improved sales.",
+      "after": "Improved sales by X%.",
+      "rationale": "Adds impact.",
+      "metricsSource": "placeholder",
+      "placeholdersNeeded": []
+    }
+  ],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  }
+}

@@ -11,7 +11,11 @@ type Analysis struct {
 	PromptVersion  string         `json:"promptVersion"`
 	Provider       string         `json:"provider"`
 	Model          string         `json:"model"`
+	ErrorMessage   *string        `json:"errorMessage,omitempty"`
+	StartedAt      *time.Time     `json:"startedAt,omitempty"`
+	CompletedAt    *time.Time     `json:"completedAt,omitempty"`
 	Status         string         `json:"status"`
 	Result         map[string]any `json:"result,omitempty"`
 	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
 }

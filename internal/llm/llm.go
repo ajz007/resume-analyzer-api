@@ -20,6 +20,7 @@ type AnalyzeInput struct {
 }
 
 type fixJSONKey struct{}
+type extraSystemKey struct{}
 
 // WithFixJSON returns a context signaling a fix-JSON retry with the given raw output.
 func WithFixJSON(ctx context.Context, raw string) context.Context {
@@ -31,6 +32,18 @@ func FixJSONFromContext(ctx context.Context) (string, bool) {
 	val := ctx.Value(fixJSONKey{})
 	raw, ok := val.(string)
 	return raw, ok
+}
+
+// WithExtraSystemMessage returns a context that adds an extra system message to the prompt.
+func WithExtraSystemMessage(ctx context.Context, message string) context.Context {
+	return context.WithValue(ctx, extraSystemKey{}, message)
+}
+
+// ExtraSystemMessageFromContext returns the extra system message, if any.
+func ExtraSystemMessageFromContext(ctx context.Context) (string, bool) {
+	val := ctx.Value(extraSystemKey{})
+	msg, ok := val.(string)
+	return msg, ok
 }
 
 // ErrNotImplemented is returned by the placeholder client.

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 )
 
 // PGRepo implements Repo using Postgres.
@@ -24,7 +25,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 // GetByID returns an analysis by ID.
 func (r *PGRepo) GetByID(ctx context.Context, analysisID string) (Analysis, error) {
 	const query = `
-SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model, created_at
+SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model,
+       error_message, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1`
@@ -34,7 +36,13 @@ LIMIT 1`
 	var promptVersion sql.NullString
 	var provider sql.NullString
 	var model sql.NullString
-	err := r.DB.QueryRowContext(ctx, query, analysisID).Scan(&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model, &a.CreatedAt)
+	var errorMessage sql.NullString
+	var startedAt sql.NullTime
+	var completedAt sql.NullTime
+	err := r.DB.QueryRowContext(ctx, query, analysisID).Scan(
+		&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model,
+		&errorMessage, &startedAt, &completedAt, &a.CreatedAt, &a.UpdatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Analysis{}, ErrNotFound
@@ -59,31 +67,53 @@ LIMIT 1`
 	if model.Valid {
 		a.Model = model.String
 	}
+	if errorMessage.Valid {
+		a.ErrorMessage = &errorMessage.String
+	}
+	if startedAt.Valid {
+		a.StartedAt = &startedAt.Time
+	}
+	if completedAt.Valid {
+		a.CompletedAt = &completedAt.Time
+	}
 	return a, nil
 }
 
 // UpdateStatus updates status/result for an analysis.
 func (r *PGRepo) UpdateStatus(ctx context.Context, analysisID, status string, result map[string]any) error {
-	const queryNoResult = `UPDATE analyses SET status = $1 WHERE id = $2`
-	const queryWithResult = `UPDATE analyses SET status = $1, result = $2 WHERE id = $3`
+	return r.UpdateStatusResultAndError(ctx, analysisID, status, result, nil, nil, nil)
+}
 
-	if result == nil {
-		res, err := r.DB.ExecContext(ctx, queryNoResult, status, analysisID)
+// UpdateStatusResultAndError updates status/result/error fields and timestamps.
+func (r *PGRepo) UpdateStatusResultAndError(ctx context.Context, analysisID, status string, result map[string]any, errorMessage *string, startedAt *time.Time, completedAt *time.Time) error {
+	const query = `
+UPDATE analyses
+SET status = $1,
+    result = CASE WHEN $2 IS NULL THEN result ELSE $2::jsonb END,
+    error_message = CASE WHEN $3 IS NULL THEN error_message ELSE $3 END,
+    started_at = CASE
+        WHEN $4 IS NOT NULL THEN $4
+        WHEN $1 = 'processing' AND started_at IS NULL THEN now()
+        ELSE started_at
+    END,
+    completed_at = CASE
+        WHEN $5 IS NOT NULL THEN $5
+        WHEN ($1 = 'completed' OR $1 = 'failed') AND completed_at IS NULL THEN now()
+        ELSE completed_at
+    END,
+    updated_at = now()
+WHERE id = $6`
+
+	var payload []byte
+	var err error
+	if result != nil {
+		payload, err = json.Marshal(result)
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
-		}
-		return nil
 	}
 
-	payload, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
-
-	res, err := r.DB.ExecContext(ctx, queryWithResult, status, payload, analysisID)
+	res, err := r.DB.ExecContext(ctx, query, status, payload, errorMessage, startedAt, completedAt, analysisID)
 	if err != nil {
 		return err
 	}
@@ -106,7 +136,8 @@ func (r *PGRepo) ListByUser(ctx context.Context, userID string, limit, offset in
 	}
 
 	const query = `
-SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model, created_at
+SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model,
+       error_message, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -126,7 +157,13 @@ LIMIT $2 OFFSET $3`
 		var promptVersion sql.NullString
 		var provider sql.NullString
 		var model sql.NullString
-		if err := rows.Scan(&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model, &a.CreatedAt); err != nil {
+		var errorMessage sql.NullString
+		var startedAt sql.NullTime
+		var completedAt sql.NullTime
+		if err := rows.Scan(
+			&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model,
+			&errorMessage, &startedAt, &completedAt, &a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		if result.Valid {
@@ -146,6 +183,15 @@ LIMIT $2 OFFSET $3`
 		}
 		if model.Valid {
 			a.Model = model.String
+		}
+		if errorMessage.Valid {
+			a.ErrorMessage = &errorMessage.String
+		}
+		if startedAt.Valid {
+			a.StartedAt = &startedAt.Time
+		}
+		if completedAt.Valid {
+			a.CompletedAt = &completedAt.Time
 		}
 		out = append(out, a)
 	}

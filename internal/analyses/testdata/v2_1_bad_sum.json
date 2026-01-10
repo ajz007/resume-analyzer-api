@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "promptVersion": "v2_1",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.6,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {
+    "overallAssessment": "ok",
+    "strengths": [],
+    "weaknesses": []
+  },
+  "ats": {
+    "score": 80,
+    "scoreBreakdown": {
+      "skills": 10,
+      "experience": 10,
+      "impact": 10,
+      "formatting": 10,
+      "roleFit": 10
+    },
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": []
+    },
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  }
+}

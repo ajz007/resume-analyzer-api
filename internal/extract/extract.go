@@ -38,15 +38,7 @@ func ExtractText(ctx context.Context, store object.ObjectStore, fileKey string, 
 		return "", fmt.Errorf("extract text key=%s mime=%s: read: %w", fileKey, mimeType, err)
 	}
 
-	var text string
-	switch mimeType {
-	case mimePDF:
-		text, err = extractPDF(raw)
-	case mimeDOCX:
-		text, err = extractDOCX(raw)
-	default:
-		return "", fmt.Errorf("extract text key=%s mime=%s: unsupported mime type", fileKey, mimeType)
-	}
+	text, err := ExtractTextFromBytes(ctx, raw, mimeType)
 	if err != nil {
 		return "", fmt.Errorf("extract text key=%s mime=%s: %w", fileKey, mimeType, err)
 	}
@@ -57,6 +49,21 @@ func ExtractText(ctx context.Context, store object.ObjectStore, fileKey string, 
 	}
 
 	return text, nil
+}
+
+// ExtractTextFromBytes extracts text from an in-memory payload.
+func ExtractTextFromBytes(ctx context.Context, data []byte, mimeType string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	switch mimeType {
+	case mimePDF:
+		return extractPDF(data)
+	case mimeDOCX:
+		return extractDOCX(data)
+	default:
+		return "", fmt.Errorf("unsupported mime type: %s", mimeType)
+	}
 }
 
 type keySaver interface {

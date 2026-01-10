@@ -42,7 +42,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		return Analysis{}, errors.New("documentID and userID are required")
 	}
 	if promptVersion == "" {
-		promptVersion = "v1"
+		promptVersion = "v2_1"
 	}
 
 	if s.Usage != nil {
@@ -106,7 +106,8 @@ func normalizeProvider(provider string) string {
 }
 
 func (s *Service) completeAsync(analysisID string) {
-	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusProcessing, nil)
+	startedAt := time.Now().UTC()
+	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusProcessing, nil, nil, &startedAt, nil)
 
 	analysis, err := s.Repo.GetByID(context.Background(), analysisID)
 	if err != nil {
@@ -124,7 +125,7 @@ func (s *Service) completeAsync(analysisID string) {
 
 	doc, err := s.DocRepo.GetByID(context.Background(), analysis.UserID, analysis.DocumentID)
 	if err != nil {
-		s.failAnalysis(analysisID, fmt.Errorf("document lookup id=%s mime=%s: %w", analysis.DocumentID, doc.MimeType, err))
+		s.failAnalysis(analysisID, fmt.Errorf("document lookup id=%s: %w", analysis.DocumentID, err))
 		return
 	}
 
@@ -147,34 +148,56 @@ func (s *Service) completeAsync(analysisID string) {
 		return
 	}
 
-	raw, err := s.LLM.AnalyzeResume(context.Background(), llm.AnalyzeInput{
+	input := llm.AnalyzeInput{
 		ResumeText:     extracted,
 		JobDescription: analysis.JobDescription,
 		PromptVersion:  analysis.PromptVersion,
 		TargetRole:     "",
-	})
-	if err != nil {
-		s.failAnalysis(analysisID, fmt.Errorf("llm analyze: %w", err))
-		return
 	}
 
-	var parsed AnalysisResultV1
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(context.Background(), string(raw)), llm.AnalyzeInput{
-			ResumeText:     extracted,
-			JobDescription: analysis.JobDescription,
-			PromptVersion:  analysis.PromptVersion,
-			TargetRole:     "",
-		})
-		if retryErr != nil {
-			s.failAnalysis(analysisID, fmt.Errorf("llm analyze retry: %w", retryErr))
+	var raw json.RawMessage
+	if analysis.PromptVersion == "v2" {
+		var err error
+		raw, err = ValidateV2WithRetry(context.Background(), s.LLM, input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2: %w", err))
 			return
 		}
-		if err := json.Unmarshal(rawRetry, &parsed); err != nil {
-			s.failAnalysis(analysisID, fmt.Errorf("llm output invalid: %w", err))
+	} else if analysis.PromptVersion == "v2_2" {
+		var err error
+		raw, err = ValidateV2_2WithRetry(context.Background(), s.LLM, input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_2: %w", err))
 			return
 		}
-		raw = rawRetry
+	} else if analysis.PromptVersion == "v2_3" {
+		var err error
+		raw, err = ValidateV2_3WithRetry(context.Background(), s.LLM, input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_3: %w", err))
+			return
+		}
+	} else {
+		var err error
+		raw, err = s.LLM.AnalyzeResume(context.Background(), input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm analyze: %w", err))
+			return
+		}
+
+		var parsed AnalysisResultV1
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(context.Background(), string(raw)), input)
+			if retryErr != nil {
+				s.failAnalysis(analysisID, fmt.Errorf("llm analyze retry: %w", retryErr))
+				return
+			}
+			if err := json.Unmarshal(rawRetry, &parsed); err != nil {
+				s.failAnalysis(analysisID, fmt.Errorf("llm output invalid: %w", err))
+				return
+			}
+			raw = rawRetry
+		}
 	}
 
 	var result map[string]any
@@ -183,17 +206,14 @@ func (s *Service) completeAsync(analysisID string) {
 		return
 	}
 
-	// Simulate work
-	time.Sleep(time.Second + 500*time.Millisecond)
-
-	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusCompleted, result)
+	completedAt := time.Now().UTC()
+	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusCompleted, result, nil, nil, &completedAt)
 }
 
 func (s *Service) failAnalysis(analysisID string, err error) {
 	msg := sanitizeError(err)
-	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusFailed, map[string]any{
-		"error": msg,
-	})
+	completedAt := time.Now().UTC()
+	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &msg, nil, &completedAt)
 }
 
 func sanitizeError(err error) string {

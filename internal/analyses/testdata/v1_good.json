@@ -1,0 +1,35 @@
+{
+  "summary": {
+    "overallAssessment": "Strong leadership and measurable delivery.",
+    "strengths": ["Clear impact", "Stakeholder alignment"],
+    "weaknesses": ["Limited recent tooling detail"]
+  },
+  "ats": {
+    "score": 82,
+    "missingKeywords": ["kubernetes", "observability"],
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "medium",
+      "section": "Experience",
+      "problem": "Some bullets lack measurable impact.",
+      "whyItMatters": "Recruiters prioritize quantified outcomes.",
+      "suggestion": "Add metrics where possible."
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Projects",
+      "before": "Built a reporting pipeline.",
+      "after": "Built a reporting pipeline that cut turnaround time by 30%.",
+      "rationale": "Highlights impact."
+    }
+  ],
+  "missingInformation": ["Certifications"],
+  "actionPlan": {
+    "quickWins": ["Add metrics to top bullets"],
+    "mediumEffort": ["Reorder skills to match job"],
+    "deepFixes": ["Rewrite summary for clarity"]
+  }
+}

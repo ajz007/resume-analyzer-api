@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,11 +36,17 @@ func NewClient(apiKey, model string) (*Client, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY is required")
 	}
+	timeout := 120 * time.Second
+	if raw := strings.TrimSpace(os.Getenv("OPENAI_TIMEOUT_SECONDS")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			timeout = time.Duration(parsed) * time.Second
+		}
+	}
 	return &Client{
 		apiKey: apiKey,
 		model:  model,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: timeout,
 		},
 	}, nil
 }
@@ -50,7 +59,7 @@ type chatMessage struct {
 type chatRequest struct {
 	Model          string         `json:"model"`
 	Messages       []chatMessage  `json:"messages"`
-	Temperature    float32        `json:"temperature"`
+	Temperature    *float32       `json:"temperature,omitempty"`
 	ResponseFormat responseFormat `json:"response_format,omitempty"`
 }
 
@@ -85,7 +94,11 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 		return c.analyzeFixJSON(ctx, input, rawFix)
 	}
 
-	raw, usage, err := c.analyzeOnce(ctx, input, systemPromptStrict, developerPrompt(input.PromptVersion), userPrompt(input))
+	messages := BuildPrompt(input.PromptVersion, input.ResumeText, input.JobDescription, c.model)
+	if extra, ok := llm.ExtraSystemMessageFromContext(ctx); ok && strings.TrimSpace(extra) != "" {
+		messages = prependSystemMessage(messages, extra)
+	}
+	raw, usage, err := c.analyzeOnce(ctx, input, messages)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +108,8 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 		return raw, nil
 	}
 
-	raw, usage, err = c.analyzeOnce(ctx, input, systemPromptFixJSON, developerPrompt(input.PromptVersion), fixUserPrompt(raw))
+	fixMessages := buildFixPrompt(input.PromptVersion, input.JobDescription, c.model, raw)
+	raw, usage, err = c.analyzeOnce(ctx, input, fixMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +121,8 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 }
 
 func (c *Client) analyzeFixJSON(ctx context.Context, input llm.AnalyzeInput, raw string) (json.RawMessage, error) {
-	rawResp, usage, err := c.analyzeOnce(ctx, input, systemPromptFixJSON, developerPrompt(input.PromptVersion), fixUserPrompt([]byte(raw)))
+	fixMessages := buildFixPrompt(input.PromptVersion, input.JobDescription, c.model, []byte(raw))
+	rawResp, usage, err := c.analyzeOnce(ctx, input, fixMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +133,21 @@ func (c *Client) analyzeFixJSON(ctx context.Context, input llm.AnalyzeInput, raw
 	return rawResp, nil
 }
 
-func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, systemPrompt, devPrompt, user string) (json.RawMessage, *chatResponseUsage, error) {
+func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messages []Message) (json.RawMessage, *chatResponseUsage, error) {
+	temp := float32(0)
+	reqMessages := make([]chatMessage, 0, len(messages))
+	for _, m := range messages {
+		reqMessages = append(reqMessages, chatMessage{Role: m.Role, Content: m.Content})
+	}
 	reqBody := chatRequest{
-		Model:       c.model,
-		Messages:    []chatMessage{{Role: "system", Content: systemPrompt}, {Role: "developer", Content: devPrompt}, {Role: "user", Content: user}},
-		Temperature: 0,
+		Model:    c.model,
+		Messages: reqMessages,
 		ResponseFormat: responseFormat{
 			Type: "json_object",
 		},
+	}
+	if !isGPT5(c.model) {
+		reqBody.Temperature = &temp
 	}
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
@@ -141,6 +163,9 @@ func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, system
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "Client.Timeout") {
+			return nil, nil, fmt.Errorf("openai request timeout: %w", err)
+		}
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
@@ -198,65 +223,8 @@ func logUsage(model, promptVersion string, usage *chatResponseUsage) {
 		model, promptVersion, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 }
 
-const systemPromptStrict = "You are a resume analysis engine. Respond with JSON only. Output must match the schema exactly."
-
-const systemPromptFixJSON = "You are a JSON repair tool. Return only valid JSON that matches the schema exactly."
-
-func developerPrompt(promptVersion string) string {
-	return fmt.Sprintf(`You must output JSON that matches this schema exactly:
-{
-  "summary": {
-    "overallAssessment": "string",
-    "strengths": ["string"],
-    "weaknesses": ["string"]
-  },
-  "ats": {
-    "score": "number (0-100)",
-    "missingKeywords": ["string"],
-    "formattingIssues": ["string"]
-  },
-  "issues": [
-    {
-      "severity": "critical | high | medium | low",
-      "section": "string",
-      "problem": "string",
-      "whyItMatters": "string",
-      "suggestion": "string"
-    }
-  ],
-  "bulletRewrites": [
-    {
-      "section": "string",
-      "before": "string",
-      "after": "string",
-      "rationale": "string"
-    }
-  ],
-  "missingInformation": ["string"],
-  "actionPlan": {
-    "quickWins": ["string"],
-    "mediumEffort": ["string"],
-    "deepFixes": ["string"]
-  }
-}
-Prompt version: %s`, promptVersion)
-}
-
-func userPrompt(input llm.AnalyzeInput) string {
-	jobDescription := input.JobDescription
-	if strings.TrimSpace(jobDescription) == "" {
-		jobDescription = "N/A"
-	}
-	targetRole := input.TargetRole
-	if strings.TrimSpace(targetRole) == "" {
-		targetRole = "N/A"
-	}
-	return fmt.Sprintf("Resume Text:\n%s\n\nJob Description:\n%s\n\nTarget Role:\n%s",
-		input.ResumeText, jobDescription, targetRole)
-}
-
-func fixUserPrompt(raw []byte) string {
-	return fmt.Sprintf("Fix this JSON to match the schema exactly. Output JSON only:\n%s", string(raw))
+func isGPT5(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-5")
 }
 
 var _ llm.Client = (*Client)(nil)
