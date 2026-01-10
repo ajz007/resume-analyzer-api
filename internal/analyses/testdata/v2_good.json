@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "promptVersion": "v2",
+    "model": "gpt-4o-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.71,
+    "assumptions": ["Target role is mid-level engineer"],
+    "limitations": ["Limited project scope details"]
+  },
+  "summary": {
+    "overallAssessment": "Solid impact with room for clearer tooling details.",
+    "strengths": ["Quantified impact", "Clear ownership"],
+    "weaknesses": ["Missing tooling specifics"]
+  },
+  "ats": {
+    "score": 78,
+    "scoreBreakdown": {
+      "skills": 20,
+      "experience": 25,
+      "impact": 25,
+      "formatting": 15,
+      "roleFit": 15
+    },
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": ["kubernetes", "observability"]
+    },
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "low",
+      "section": "Experience",
+      "problem": "Tooling is vague.",
+      "whyItMatters": "Hiring managers look for stack alignment.",
+      "suggestion": "Specify primary tools and frameworks.",
+      "evidence": "notFound",
+      "fixEffort": "30min"
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Projects",
+      "before": "Improved pipeline.",
+      "after": "Improved pipeline throughput by 25%.",
+      "rationale": "Adds measurable impact."
+    }
+  ],
+  "missingInformation": ["Certifications"],
+  "actionPlan": {
+    "quickWins": ["Add tooling details"],
+    "mediumEffort": ["Align skills with target role"],
+    "deepFixes": ["Rework summary for clarity"]
+  }
+}

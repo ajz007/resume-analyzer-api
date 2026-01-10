@@ -14,12 +14,13 @@ import (
 
 	"resume-backend/internal/documents"
 	"resume-backend/internal/shared/server/middleware"
+	local "resume-backend/internal/shared/storage/object/local"
 )
 
 func TestStartAnalysisDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo := setupAnalysisRouter()
+	router, docRepo, analysisRepo := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, userID)
 
@@ -49,15 +50,15 @@ func TestStartAnalysisDefaults(t *testing.T) {
 	if analysis.JobDescription != "" {
 		t.Fatalf("expected empty jobDescription, got %q", analysis.JobDescription)
 	}
-	if analysis.PromptVersion != "v1" {
-		t.Fatalf("expected promptVersion v1, got %q", analysis.PromptVersion)
+	if analysis.PromptVersion != "v2_1" {
+		t.Fatalf("expected promptVersion v2_1, got %q", analysis.PromptVersion)
 	}
 }
 
 func TestStartAnalysisWithBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo := setupAnalysisRouter()
+	router, docRepo, analysisRepo := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, userID)
 
@@ -105,7 +106,7 @@ func TestStartAnalysisWithBody(t *testing.T) {
 func TestStartAnalysisRejectsLongJobDescription(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, _ := setupAnalysisRouter()
+	router, docRepo, _ := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, userID)
 
@@ -129,10 +130,13 @@ func TestStartAnalysisRejectsLongJobDescription(t *testing.T) {
 	}
 }
 
-func setupAnalysisRouter() (*gin.Engine, *documents.MemoryRepo, *MemoryRepo) {
+func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *MemoryRepo) {
+	t.Helper()
 	docRepo := documents.NewMemoryRepo()
 	analysisRepo := NewMemoryRepo()
-	svc := &Service{Repo: analysisRepo}
+	storeDir := t.TempDir()
+	store := local.New(storeDir)
+	svc := &Service{Repo: analysisRepo, DocRepo: docRepo, Store: store}
 	handler := NewHandler(svc, docRepo)
 
 	router := gin.New()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // MemoryRepo is an in-memory implementation of DocumentsRepo.
@@ -58,6 +59,27 @@ func (r *MemoryRepo) GetByID(ctx context.Context, userId, documentID string) (Do
 		}
 	}
 	return Document{}, ErrNotFound
+}
+
+// UpdateExtraction stores the extracted text metadata for a document.
+func (r *MemoryRepo) UpdateExtraction(ctx context.Context, userId, documentID, extractedKey string, extractedAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	docs := r.data[userId]
+	for i := range docs {
+		if docs[i].ID == documentID {
+			if docs[i].ExtractedTextKey == "" {
+				docs[i].ExtractedTextKey = extractedKey
+				docs[i].ExtractedAt = &extractedAt
+				r.data[userId] = docs
+			}
+			return nil
+		}
+	}
+	return ErrNotFound
 }
 
 // ListByUser returns documents for a user, newest first, honoring limit/offset.

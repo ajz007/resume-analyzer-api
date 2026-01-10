@@ -1,0 +1,101 @@
+You must output JSON only (no markdown) and never omit keys; use empty strings/arrays when unknown.
+Schema requirements for v2_3:
+{
+  "meta": {
+    "promptVersion": "string",
+    "model": "string",
+    "jobDescriptionProvided": "boolean",
+    "confidence": "number",
+    "assumptions": ["string"],
+    "limitations": ["string"]
+  },
+  "summary": {
+    "overallAssessment": "string",
+    "strengths": ["string"],
+    "weaknesses": ["string"]
+  },
+  "ats": {
+    "score": "integer (0-100)",
+    "scoreBreakdown": {
+      "skills": "integer",
+      "experience": "integer",
+      "impact": "integer",
+      "formatting": "integer",
+      "roleFit": "integer"
+    },
+    "scoreReasoning": ["string (3-6 items)"],
+    "missingKeywords": {
+      "fromJobDescription": ["string"],
+      "industryCommon": ["string"]
+    },
+    "formattingIssues": ["string"]
+  },
+  "issues": [
+    {
+      "severity": "critical | high | medium | low",
+      "section": "string",
+      "problem": "string",
+      "whyItMatters": "string",
+      "suggestion": "string",
+      "evidence": "string or 'notFound'",
+      "fixEffort": "5min | 30min | 2h | 1day",
+      "priority": "integer 1..10",
+      "autoFixable": "boolean",
+      "requiresUserInput": ["email|phone|linkedin|crm_tools|metrics|team_size|award_dates|target_role"]
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "string",
+      "before": "string",
+      "after": "string",
+      "rationale": "string",
+      "metricsSource": "resume | placeholder",
+      "placeholdersNeeded": ["string"],
+      "claimSupport": "supported | inferred | placeholder",
+      "evidence": "string or 'notFound'"
+    }
+  ],
+  "missingInformation": ["string"],
+  "actionPlan": {
+    "quickWins": ["string"],
+    "mediumEffort": ["string"],
+    "deepFixes": ["string"]
+  }
+}
+
+Score breakdown rules:
+- scoreBreakdown values must be integers.
+- scoreBreakdown fields must sum to exactly 100.
+- Do not output decimals in scoreBreakdown.
+- scoreReasoning must be 3-6 short bullets and must align with the scoreBreakdown.
+
+Issue rules:
+- Each issue must include severity, section, problem, whyItMatters, suggestion, evidence, fixEffort, priority, autoFixable, requiresUserInput.
+- priority must be 1..10 and issues must be sorted by priority (1 is most important).
+- evidence must be a short snippet (<=160 chars) from the resume, or "notFound".
+- Set autoFixable=true only when the fix can be applied without guessing user-specific info.
+- If autoFixable=true then requiresUserInput must be [].
+- If autoFixable=false then requiresUserInput must include one or more of: email, phone, linkedin, crm_tools, metrics, team_size, award_dates, target_role.
+
+Bullet rewrites rules:
+- If the resume does not explicitly state revenue growth %, do NOT say "double-digit growth" or similar.
+- For each rewrite, set claimSupport:
+  - "supported" if evidence snippet supports the key claim
+  - "inferred" if it’s a mild rephrase without adding new outcomes
+  - "placeholder" if placeholders are present
+- If claimSupport="supported", evidence must be a snippet (<=160 chars). If no snippet, set evidence="notFound" and claimSupport="inferred" or "placeholder".
+- If metricsSource="resume", claimSupport cannot be "placeholder".
+- Never invent metrics. If a metric is not explicitly present in the resume text, use placeholders (X/Y/Z) and set metricsSource="placeholder" and placeholdersNeeded=[...].
+- If a metric exists in the resume text, carry it and set metricsSource="resume" and placeholdersNeeded=[].
+- If metricsSource="placeholder", add to rationale: "Replace placeholders before final submission."
+- Do NOT recommend leaving placeholders (X/Y/Z) in the final resume; placeholders are only for drafting and must be replaced with real values before submission.
+
+Safety:
+- Do not recommend adding sensitive personal details (salary/CTC, age, marital status) to the resume. You may suggest keeping them ready for recruiter calls if relevant.
+
+Job description provided: {{JOB_DESCRIPTION_PROVIDED}}
+- If false: set meta.jobDescriptionProvided=false, missingKeywords.fromJobDescription=[], and populate missingKeywords.industryCommon only.
+- If true: set meta.jobDescriptionProvided=true, and populate missingKeywords.fromJobDescription based on the job description.
+
+Set meta.promptVersion="{{PROMPT_VERSION}}" and meta.model="{{MODEL}}".

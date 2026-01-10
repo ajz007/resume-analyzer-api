@@ -2,11 +2,19 @@ package analyses
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"resume-backend/internal/documents"
+	"resume-backend/internal/extract"
+	"resume-backend/internal/llm"
+	"resume-backend/internal/shared/storage/object"
 	"resume-backend/internal/usage"
 )
 
@@ -14,12 +22,16 @@ const (
 	StatusQueued     = "queued"
 	StatusProcessing = "processing"
 	StatusCompleted  = "completed"
+	StatusFailed     = "failed"
 )
 
 // Service contains business logic for analyses.
 type Service struct {
 	Repo     Repo
 	Usage    *usage.Service
+	DocRepo  documents.DocumentsRepo
+	Store    object.ObjectStore
+	LLM      llm.Client
 	Provider string
 	Model    string
 }
@@ -30,7 +42,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		return Analysis{}, errors.New("documentID and userID are required")
 	}
 	if promptVersion == "" {
-		promptVersion = "v1"
+		promptVersion = "v2_1"
 	}
 
 	if s.Usage != nil {
@@ -94,21 +106,140 @@ func normalizeProvider(provider string) string {
 }
 
 func (s *Service) completeAsync(analysisID string) {
-	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusProcessing, nil)
+	startedAt := time.Now().UTC()
+	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusProcessing, nil, nil, &startedAt, nil)
 
-	// Simulate work
-	time.Sleep(time.Second + 500*time.Millisecond)
-
-	result := map[string]any{
-		"analysisId":        analysisID,
-		"createdAt":         time.Now().UTC().Format(time.RFC3339),
-		"matchScore":        72,
-		"missingKeywords":   []string{},
-		"weakKeywords":      []string{},
-		"atsChecks":         []map[string]any{},
-		"bulletSuggestions": []map[string]any{},
-		"summary":           "Stub analysis complete",
-		"nextSteps":         []string{},
+	analysis, err := s.Repo.GetByID(context.Background(), analysisID)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("analysis lookup: %w", err))
+		return
 	}
-	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusCompleted, result)
+	if s.DocRepo == nil || s.Store == nil {
+		s.failAnalysis(analysisID, errors.New("missing document store dependencies"))
+		return
+	}
+	if s.LLM == nil {
+		s.failAnalysis(analysisID, errors.New("missing llm client"))
+		return
+	}
+
+	doc, err := s.DocRepo.GetByID(context.Background(), analysis.UserID, analysis.DocumentID)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("document lookup id=%s: %w", analysis.DocumentID, err))
+		return
+	}
+
+	extractedKey := doc.ExtractedTextKey
+	if extractedKey == "" {
+		if _, err := extract.ExtractText(context.Background(), s.Store, doc.StorageKey, doc.MimeType); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err))
+			return
+		}
+		extractedKey = doc.StorageKey + ".extracted.txt"
+		if err := s.DocRepo.UpdateExtraction(context.Background(), doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err))
+			return
+		}
+	}
+
+	extracted, err := loadText(context.Background(), s.Store, extractedKey)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err))
+		return
+	}
+
+	input := llm.AnalyzeInput{
+		ResumeText:     extracted,
+		JobDescription: analysis.JobDescription,
+		PromptVersion:  analysis.PromptVersion,
+		TargetRole:     "",
+	}
+
+	var raw json.RawMessage
+	if analysis.PromptVersion == "v2" {
+		var err error
+		raw, err = ValidateV2WithRetry(context.Background(), s.LLM, input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2: %w", err))
+			return
+		}
+	} else if analysis.PromptVersion == "v2_2" {
+		var err error
+		raw, err = ValidateV2_2WithRetry(context.Background(), s.LLM, input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_2: %w", err))
+			return
+		}
+	} else if analysis.PromptVersion == "v2_3" {
+		var err error
+		raw, err = ValidateV2_3WithRetry(context.Background(), s.LLM, input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_3: %w", err))
+			return
+		}
+	} else {
+		var err error
+		raw, err = s.LLM.AnalyzeResume(context.Background(), input)
+		if err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm analyze: %w", err))
+			return
+		}
+
+		var parsed AnalysisResultV1
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(context.Background(), string(raw)), input)
+			if retryErr != nil {
+				s.failAnalysis(analysisID, fmt.Errorf("llm analyze retry: %w", retryErr))
+				return
+			}
+			if err := json.Unmarshal(rawRetry, &parsed); err != nil {
+				s.failAnalysis(analysisID, fmt.Errorf("llm output invalid: %w", err))
+				return
+			}
+			raw = rawRetry
+		}
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("llm output parse: %w", err))
+		return
+	}
+
+	completedAt := time.Now().UTC()
+	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusCompleted, result, nil, nil, &completedAt)
+}
+
+func (s *Service) failAnalysis(analysisID string, err error) {
+	msg := sanitizeError(err)
+	completedAt := time.Now().UTC()
+	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &msg, nil, &completedAt)
+}
+
+func sanitizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ReplaceAll(err.Error(), "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.TrimSpace(msg)
+	const maxLen = 500
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	return msg
+}
+
+func loadText(ctx context.Context, store object.ObjectStore, key string) (string, error) {
+	body, err := store.Open(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }

@@ -1,0 +1,54 @@
+{
+  "meta": {
+    "promptVersion": "v2_3",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.6,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {
+    "overallAssessment": "ok",
+    "strengths": [],
+    "weaknesses": []
+  },
+  "ats": {
+    "score": 80,
+    "scoreBreakdown": {
+      "skills": 20,
+      "experience": 20,
+      "impact": 20,
+      "formatting": 20,
+      "roleFit": 20
+    },
+    "scoreReasoning": [
+      "Skills are solid.",
+      "Experience is consistent.",
+      "Formatting is acceptable."
+    ],
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": []
+    },
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [
+    {
+      "section": "Experience",
+      "before": "Improved sales.",
+      "after": "Improved sales by 10%.",
+      "rationale": "Adds impact.",
+      "metricsSource": "resume",
+      "placeholdersNeeded": [],
+      "claimSupport": "placeholder",
+      "evidence": "notFound"
+    }
+  ],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  }
+}

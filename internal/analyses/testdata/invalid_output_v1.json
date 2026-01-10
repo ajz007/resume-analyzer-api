@@ -1,0 +1,20 @@
+{
+  "summary": {
+    "overallAssessment": "Missing required arrays",
+    "strengths": "should be array",
+    "weaknesses": []
+  },
+  "ats": {
+    "score": "not a number",
+    "missingKeywords": [],
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  }
+}

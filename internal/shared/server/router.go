@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 
 	"resume-backend/internal/analyses"
 	googleauth "resume-backend/internal/auth"
 	"resume-backend/internal/documents"
+	"resume-backend/internal/llm"
+	openai "resume-backend/internal/llm/openai"
 	"resume-backend/internal/shared/config"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
@@ -84,9 +87,21 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	} else {
 		analysisRepo = analyses.NewMemoryRepo()
 	}
+	llmClient := llm.Client(llm.PlaceholderClient{})
+	if cfg.LLMProvider == "openai" {
+		openaiClient, err := openai.NewClient(os.Getenv("OPENAI_API_KEY"), cfg.LLMModel)
+		if err != nil {
+			log.Fatalf("failed to initialize openai client: %v", err)
+		}
+		llmClient = openaiClient
+	}
+
 	analysisSvc := &analyses.Service{
 		Repo:     analysisRepo,
 		Usage:    usageSvc,
+		DocRepo:  docRepo,
+		Store:    store,
+		LLM:      llmClient,
 		Provider: cfg.LLMProvider,
 		Model:    cfg.LLMModel,
 	}

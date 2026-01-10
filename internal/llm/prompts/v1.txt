@@ -1,0 +1,37 @@
+You must output JSON that matches this schema exactly:
+{
+  "summary": {
+    "overallAssessment": "string",
+    "strengths": ["string"],
+    "weaknesses": ["string"]
+  },
+  "ats": {
+    "score": "number (0-100)",
+    "missingKeywords": ["string"],
+    "formattingIssues": ["string"]
+  },
+  "issues": [
+    {
+      "severity": "critical | high | medium | low",
+      "section": "string",
+      "problem": "string",
+      "whyItMatters": "string",
+      "suggestion": "string"
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "string",
+      "before": "string",
+      "after": "string",
+      "rationale": "string"
+    }
+  ],
+  "missingInformation": ["string"],
+  "actionPlan": {
+    "quickWins": ["string"],
+    "mediumEffort": ["string"],
+    "deepFixes": ["string"]
+  }
+}
+Prompt version: {{PROMPT_VERSION}}

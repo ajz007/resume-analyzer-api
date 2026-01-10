@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // MemoryRepo stores analyses in memory and is safe for concurrent use.
@@ -49,6 +50,11 @@ func (r *MemoryRepo) GetByID(ctx context.Context, analysisID string) (Analysis, 
 
 // UpdateStatus updates the status and result for an existing analysis.
 func (r *MemoryRepo) UpdateStatus(ctx context.Context, analysisID, status string, result map[string]any) error {
+	return r.UpdateStatusResultAndError(ctx, analysisID, status, result, nil, nil, nil)
+}
+
+// UpdateStatusResultAndError updates status/result/error fields and timestamps.
+func (r *MemoryRepo) UpdateStatusResultAndError(ctx context.Context, analysisID, status string, result map[string]any, errorMessage *string, startedAt *time.Time, completedAt *time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -62,6 +68,22 @@ func (r *MemoryRepo) UpdateStatus(ctx context.Context, analysisID, status string
 	if result != nil {
 		analysis.Result = result
 	}
+	if errorMessage != nil {
+		analysis.ErrorMessage = errorMessage
+	}
+	if startedAt != nil {
+		analysis.StartedAt = startedAt
+	} else if status == StatusProcessing && analysis.StartedAt == nil {
+		now := time.Now().UTC()
+		analysis.StartedAt = &now
+	}
+	if completedAt != nil {
+		analysis.CompletedAt = completedAt
+	} else if (status == StatusCompleted || status == StatusFailed) && analysis.CompletedAt == nil {
+		now := time.Now().UTC()
+		analysis.CompletedAt = &now
+	}
+	analysis.UpdatedAt = time.Now().UTC()
 	r.byID[analysisID] = analysis
 
 	// update in user slice

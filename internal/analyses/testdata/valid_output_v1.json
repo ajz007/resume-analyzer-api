@@ -1,0 +1,55 @@
+{
+  "summary": {
+    "overallAssessment": "Solid experience with clear impact and leadership.",
+    "strengths": [
+      "Strong ownership and delivery",
+      "Clear metrics and outcomes"
+    ],
+    "weaknesses": [
+      "Missing recent project context",
+      "Limited quantification in some bullets"
+    ]
+  },
+  "ats": {
+    "score": 78,
+    "missingKeywords": [
+      "Kubernetes",
+      "Observability"
+    ],
+    "formattingIssues": [
+      "Inconsistent bullet punctuation"
+    ]
+  },
+  "issues": [
+    {
+      "severity": "high",
+      "section": "Experience",
+      "problem": "Several bullets lack measurable impact.",
+      "whyItMatters": "Recruiters scan for quantified outcomes.",
+      "suggestion": "Add metrics like time saved or revenue impact."
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Projects",
+      "before": "Built a pipeline for data ingestion.",
+      "after": "Built a data ingestion pipeline that reduced processing time by 40%.",
+      "rationale": "Highlights measurable impact."
+    }
+  ],
+  "missingInformation": [
+    "Certifications",
+    "Location"
+  ],
+  "actionPlan": {
+    "quickWins": [
+      "Add metrics to top 3 bullets"
+    ],
+    "mediumEffort": [
+      "Reorder skills to match target role"
+    ],
+    "deepFixes": [
+      "Rewrite summary to emphasize leadership"
+    ]
+  }
+}

@@ -4,3 +4,7 @@ cmd/.env
 data/
 docker-compose-local.yml
 docker-compose.yml
+.exe
+out/
+.pdf
+.docx

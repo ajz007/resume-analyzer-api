@@ -1,6 +1,9 @@
 package documents
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // DocumentsRepo defines persistence operations for documents.
 type DocumentsRepo interface {
@@ -8,4 +11,5 @@ type DocumentsRepo interface {
 	GetCurrentByUser(ctx context.Context, userId string) (Document, error)
 	ListByUser(ctx context.Context, userId string, limit, offset int) ([]Document, error)
 	GetByID(ctx context.Context, userId, documentID string) (Document, error)
+	UpdateExtraction(ctx context.Context, userId, documentID, extractedKey string, extractedAt time.Time) error
 }

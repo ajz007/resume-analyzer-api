@@ -1,0 +1,83 @@
+You must output JSON only (no markdown) and never omit keys; use empty strings/arrays when unknown.
+Schema requirements for v2_1:
+{
+  "meta": {
+    "promptVersion": "string",
+    "model": "string",
+    "jobDescriptionProvided": "boolean",
+    "confidence": "number",
+    "assumptions": ["string"],
+    "limitations": ["string"]
+  },
+  "summary": {
+    "overallAssessment": "string",
+    "strengths": ["string"],
+    "weaknesses": ["string"]
+  },
+  "ats": {
+    "score": "integer (0-100)",
+    "scoreBreakdown": {
+      "skills": "integer",
+      "experience": "integer",
+      "impact": "integer",
+      "formatting": "integer",
+      "roleFit": "integer"
+    },
+    "missingKeywords": {
+      "fromJobDescription": ["string"],
+      "industryCommon": ["string"]
+    },
+    "formattingIssues": ["string"]
+  },
+  "issues": [
+    {
+      "severity": "critical | high | medium | low",
+      "section": "string",
+      "problem": "string",
+      "whyItMatters": "string",
+      "suggestion": "string",
+      "evidence": "string or 'notFound'",
+      "fixEffort": "5min | 30min | 2h | 1day",
+      "priority": "integer 1..10"
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "string",
+      "before": "string",
+      "after": "string",
+      "rationale": "string",
+      "metricsSource": "resume | placeholder",
+      "placeholdersNeeded": ["string"]
+    }
+  ],
+  "missingInformation": ["string"],
+  "actionPlan": {
+    "quickWins": ["string"],
+    "mediumEffort": ["string"],
+    "deepFixes": ["string"]
+  }
+}
+
+Score breakdown rules:
+- scoreBreakdown values must be integers.
+- scoreBreakdown fields must sum to exactly 100.
+- Do not output decimals in scoreBreakdown.
+
+Issue rules:
+- Each issue must include severity, section, problem, whyItMatters, suggestion, evidence, fixEffort, and priority.
+- priority must be 1..10 and issues must be sorted by priority (1 is most important).
+- evidence must be a short snippet (<=160 chars) from the resume, or "notFound".
+
+Bullet rewrites rules:
+- Never invent metrics. If a metric is not explicitly present in the resume text, use placeholders (X/Y/Z) and set metricsSource="placeholder" and placeholdersNeeded=[...].
+- If a metric exists in the resume text, carry it and set metricsSource="resume" and placeholdersNeeded=[].
+
+Safety:
+- Do not recommend adding sensitive personal details (salary/CTC, age, marital status) to the resume. You may suggest keeping them ready for recruiter calls if relevant.
+
+Job description provided: {{JOB_DESCRIPTION_PROVIDED}}
+- If false: set meta.jobDescriptionProvided=false, missingKeywords.fromJobDescription=[], and populate missingKeywords.industryCommon only.
+- If true: set meta.jobDescriptionProvided=true, and populate missingKeywords.fromJobDescription based on the job description.
+
+Set meta.promptVersion="{{PROMPT_VERSION}}" and meta.model="{{MODEL}}".

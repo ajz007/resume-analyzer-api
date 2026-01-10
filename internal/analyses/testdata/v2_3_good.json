@@ -1,0 +1,67 @@
+{
+  "meta": {
+    "promptVersion": "v2_3",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.6,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {
+    "overallAssessment": "ok",
+    "strengths": [],
+    "weaknesses": []
+  },
+  "ats": {
+    "score": 80,
+    "scoreBreakdown": {
+      "skills": 20,
+      "experience": 20,
+      "impact": 20,
+      "formatting": 20,
+      "roleFit": 20
+    },
+    "scoreReasoning": [
+      "Balanced skills and experience.",
+      "Impact is supported by metrics.",
+      "Formatting is acceptable."
+    ],
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": ["crm"]
+    },
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "low",
+      "section": "Formatting",
+      "problem": "Emoji usage",
+      "whyItMatters": "ATS parsing",
+      "suggestion": "Remove emojis",
+      "evidence": "notFound",
+      "fixEffort": "5min",
+      "priority": 1,
+      "autoFixable": true,
+      "requiresUserInput": []
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Experience",
+      "before": "Improved sales.",
+      "after": "Improved sales by X%.",
+      "rationale": "Adds impact. Replace placeholders before final submission.",
+      "metricsSource": "placeholder",
+      "placeholdersNeeded": ["percentage increase"],
+      "claimSupport": "placeholder",
+      "evidence": "notFound"
+    }
+  ],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  }
+}

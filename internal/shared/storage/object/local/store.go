@@ -99,6 +99,35 @@ func (s *Store) Open(ctx context.Context, storageKey string) (io.ReadCloser, err
 	return f, nil
 }
 
+// SaveWithKey writes the reader to disk at a specific storage key.
+func (s *Store) SaveWithKey(ctx context.Context, storageKey string, contentType string, r io.Reader) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	clean := filepath.Clean(storageKey)
+	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		return 0, fmt.Errorf("invalid storage key")
+	}
+
+	fullPath := filepath.Join(s.baseDir, clean)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return 0, fmt.Errorf("mkdir: %w", err)
+	}
+	f, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	written, err := io.Copy(f, r)
+	if err != nil {
+		return 0, fmt.Errorf("write body: %w", err)
+	}
+	_ = contentType
+	return written, nil
+}
+
 func randomID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
