@@ -120,6 +120,34 @@ func (s *Store) Open(ctx context.Context, storageKey string) (io.ReadCloser, err
 	return out.Body, nil
 }
 
+// SaveWithKey uploads data to a specific storage key.
+func (s *Store) SaveWithKey(ctx context.Context, storageKey string, contentType string, r io.Reader) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	objectKey := applyPrefix(s.prefix, storageKey)
+	counter := &countingReader{r: r}
+
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(objectKey),
+		Body:        counter,
+		ContentType: aws.String(contentType),
+	}
+	if s.kmsKeyID != "" {
+		input.ServerSideEncryption = s3types.ServerSideEncryptionAwsKms
+		input.SSEKMSKeyId = aws.String(s.kmsKeyID)
+	} else {
+		input.ServerSideEncryption = s3types.ServerSideEncryptionAes256
+	}
+
+	if _, err := s.client.PutObject(ctx, input); err != nil {
+		return 0, fmt.Errorf("s3 put object bucket=%s key=%s: %w", s.bucket, objectKey, err)
+	}
+	return counter.n, nil
+}
+
 type countingReader struct {
 	r io.Reader
 	n int64

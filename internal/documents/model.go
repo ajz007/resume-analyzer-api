@@ -4,11 +4,13 @@ import "time"
 
 // Document represents an uploaded document owned by a user.
 type Document struct {
-	ID         string
-	UserID     string
-	FileName   string
-	MimeType   string
-	SizeBytes  int64
-	StorageKey string
-	CreatedAt  time.Time
+	ID               string
+	UserID           string
+	FileName         string
+	MimeType         string
+	SizeBytes        int64
+	StorageKey       string
+	ExtractedTextKey string
+	ExtractedAt      *time.Time
+	CreatedAt        time.Time
 }

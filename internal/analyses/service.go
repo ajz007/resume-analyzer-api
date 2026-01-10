@@ -2,11 +2,19 @@ package analyses
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"resume-backend/internal/documents"
+	"resume-backend/internal/extract"
+	"resume-backend/internal/llm"
+	"resume-backend/internal/shared/storage/object"
 	"resume-backend/internal/usage"
 )
 
@@ -14,12 +22,16 @@ const (
 	StatusQueued     = "queued"
 	StatusProcessing = "processing"
 	StatusCompleted  = "completed"
+	StatusFailed     = "failed"
 )
 
 // Service contains business logic for analyses.
 type Service struct {
 	Repo     Repo
 	Usage    *usage.Service
+	DocRepo  documents.DocumentsRepo
+	Store    object.ObjectStore
+	LLM      llm.Client
 	Provider string
 	Model    string
 }
@@ -96,19 +108,118 @@ func normalizeProvider(provider string) string {
 func (s *Service) completeAsync(analysisID string) {
 	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusProcessing, nil)
 
+	analysis, err := s.Repo.GetByID(context.Background(), analysisID)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("analysis lookup: %w", err))
+		return
+	}
+	if s.DocRepo == nil || s.Store == nil {
+		s.failAnalysis(analysisID, errors.New("missing document store dependencies"))
+		return
+	}
+	if s.LLM == nil {
+		s.failAnalysis(analysisID, errors.New("missing llm client"))
+		return
+	}
+
+	doc, err := s.DocRepo.GetByID(context.Background(), analysis.UserID, analysis.DocumentID)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("document lookup id=%s mime=%s: %w", analysis.DocumentID, doc.MimeType, err))
+		return
+	}
+
+	extractedKey := doc.ExtractedTextKey
+	if extractedKey == "" {
+		if _, err := extract.ExtractText(context.Background(), s.Store, doc.StorageKey, doc.MimeType); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err))
+			return
+		}
+		extractedKey = doc.StorageKey + ".extracted.txt"
+		if err := s.DocRepo.UpdateExtraction(context.Background(), doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err))
+			return
+		}
+	}
+
+	extracted, err := loadText(context.Background(), s.Store, extractedKey)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err))
+		return
+	}
+
+	raw, err := s.LLM.AnalyzeResume(context.Background(), llm.AnalyzeInput{
+		ResumeText:     extracted,
+		JobDescription: analysis.JobDescription,
+		PromptVersion:  analysis.PromptVersion,
+		TargetRole:     "",
+	})
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("llm analyze: %w", err))
+		return
+	}
+
+	var parsed AnalysisResultV1
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(context.Background(), string(raw)), llm.AnalyzeInput{
+			ResumeText:     extracted,
+			JobDescription: analysis.JobDescription,
+			PromptVersion:  analysis.PromptVersion,
+			TargetRole:     "",
+		})
+		if retryErr != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm analyze retry: %w", retryErr))
+			return
+		}
+		if err := json.Unmarshal(rawRetry, &parsed); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("llm output invalid: %w", err))
+			return
+		}
+		raw = rawRetry
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("llm output parse: %w", err))
+		return
+	}
+
 	// Simulate work
 	time.Sleep(time.Second + 500*time.Millisecond)
 
-	result := map[string]any{
-		"analysisId":        analysisID,
-		"createdAt":         time.Now().UTC().Format(time.RFC3339),
-		"matchScore":        72,
-		"missingKeywords":   []string{},
-		"weakKeywords":      []string{},
-		"atsChecks":         []map[string]any{},
-		"bulletSuggestions": []map[string]any{},
-		"summary":           "Stub analysis complete",
-		"nextSteps":         []string{},
-	}
 	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusCompleted, result)
+}
+
+func (s *Service) failAnalysis(analysisID string, err error) {
+	msg := sanitizeError(err)
+	_ = s.Repo.UpdateStatus(context.Background(), analysisID, StatusFailed, map[string]any{
+		"error": msg,
+	})
+}
+
+func sanitizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ReplaceAll(err.Error(), "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.TrimSpace(msg)
+	const maxLen = 500
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	return msg
+}
+
+func loadText(ctx context.Context, store object.ObjectStore, key string) (string, error) {
+	body, err := store.Open(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
