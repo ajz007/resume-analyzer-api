@@ -1,10 +1,13 @@
 package analyses
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -32,11 +35,28 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/analyses/:id", h.getAnalysis)
 }
 
+type startAnalysisRequest struct {
+	JobDescription string `json:"jobDescription"`
+	PromptVersion  string `json:"promptVersion"`
+}
+
 func (h *Handler) startAnalysis(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c)
 	documentID := c.Param("id")
 	if documentID == "" {
 		respond.Error(c, http.StatusBadRequest, "validation_error", "document id is required", nil)
+		return
+	}
+
+	req := startAnalysisRequest{PromptVersion: "v1"}
+	if err := decodeOptionalJSON(c.Request.Body, &req); err != nil {
+		respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
+		return
+	}
+	if utf8.RuneCountInString(req.JobDescription) > 50000 {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription too long", []map[string]string{
+			{"field": "jobDescription", "issue": "max_length"},
+		})
 		return
 	}
 	log.Printf("Starting analysis for user %s on document %s", userID, documentID)
@@ -52,7 +72,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		return
 	}
 
-	analysis, err := h.Svc.Create(c.Request.Context(), doc.ID, userID)
+	analysis, err := h.Svc.Create(c.Request.Context(), doc.ID, userID, req.JobDescription, req.PromptVersion)
 	if err != nil {
 		switch {
 		case errors.Is(err, usage.ErrLimitReached):
@@ -157,4 +177,22 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 	}
 
 	respond.JSON(c, http.StatusOK, resp)
+}
+
+func decodeOptionalJSON(body io.ReadCloser, out any) error {
+	if body == nil {
+		return nil
+	}
+	var errInvalidJSON = errors.New("invalid json body")
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(out); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return errInvalidJSON
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errInvalidJSON
+	}
+	return nil
 }

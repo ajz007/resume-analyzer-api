@@ -15,7 +15,9 @@ import (
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
 	"resume-backend/internal/shared/storage/db"
+	"resume-backend/internal/shared/storage/object"
 	localstore "resume-backend/internal/shared/storage/object/local"
+	s3store "resume-backend/internal/shared/storage/object/s3"
 	"resume-backend/internal/usage"
 )
 
@@ -33,7 +35,20 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	)
 
 	// Dependencies
-	store := localstore.New(cfg.LocalStoreDir)
+	var store object.ObjectStore
+	switch cfg.ObjectStoreType {
+	case "s3":
+		if cfg.AWSRegion == "" || cfg.S3Bucket == "" {
+			log.Fatal("OBJECT_STORE=s3 requires AWS_REGION and S3_BUCKET")
+		}
+		s3Store, err := s3store.New(context.Background(), cfg.AWSRegion, cfg.S3Bucket, cfg.S3Prefix, cfg.SSEKMSKeyID)
+		if err != nil {
+			log.Fatalf("failed to initialize s3 object store: %v", err)
+		}
+		store = s3Store
+	default:
+		store = localstore.New(cfg.LocalStoreDir)
+	}
 	var sqlDB *sql.DB
 	if cfg.DatabaseURL != "" {
 		dbConn, err := db.Connect(context.Background(), cfg.DatabaseURL)
@@ -69,7 +84,12 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	} else {
 		analysisRepo = analyses.NewMemoryRepo()
 	}
-	analysisSvc := &analyses.Service{Repo: analysisRepo, Usage: usageSvc}
+	analysisSvc := &analyses.Service{
+		Repo:     analysisRepo,
+		Usage:    usageSvc,
+		Provider: cfg.LLMProvider,
+		Model:    cfg.LLMModel,
+	}
 	analysisHandler := analyses.NewHandler(analysisSvc, docRepo)
 	googleAuthSvc := googleauth.NewGoogleService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, cfg.UIRedirectURL)
 

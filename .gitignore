@@ -3,3 +3,4 @@
 cmd/.env
 data/
 docker-compose-local.yml
+docker-compose.yml

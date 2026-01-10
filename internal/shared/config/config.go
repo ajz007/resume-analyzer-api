@@ -10,7 +10,14 @@ import (
 type Config struct {
 	Port               string
 	CORSAllowOrigin    []string
+	ObjectStoreType    string
 	LocalStoreDir      string
+	AWSRegion          string
+	S3Bucket           string
+	S3Prefix           string
+	SSEKMSKeyID        string
+	LLMProvider        string
+	LLMModel           string
 	DatabaseURL        string
 	Env                string
 	GoogleClientID     string
@@ -34,7 +41,14 @@ func Load() Config {
 	return Config{
 		Port:               getEnv("PORT", "8080"),
 		CORSAllowOrigin:    splitAndTrim(getEnv("CORS_ALLOW_ORIGINS", "http://localhost:5173")),
+		ObjectStoreType:    normalizeStoreType(getEnv("OBJECT_STORE", "local")),
 		LocalStoreDir:      getEnv("LOCAL_STORE_DIR", "./data"),
+		AWSRegion:          getEnv("AWS_REGION", ""),
+		S3Bucket:           getEnv("S3_BUCKET", ""),
+		S3Prefix:           getEnv("S3_PREFIX", ""),
+		SSEKMSKeyID:        getEnv("SSE_KMS_KEY_ID", ""),
+		LLMProvider:        getEnv("LLM_PROVIDER", "openai"),
+		LLMModel:           getEnv("LLM_MODEL", ""),
 		DatabaseURL:        dbURL,
 		Env:                env,
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
@@ -72,5 +86,14 @@ func normalizeEnv(raw string) string {
 		return "dev"
 	default:
 		return "dev"
+	}
+}
+
+func normalizeStoreType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "s3":
+		return "s3"
+	default:
+		return "local"
 	}
 }

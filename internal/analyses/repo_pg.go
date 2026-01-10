@@ -15,22 +15,26 @@ type PGRepo struct {
 // Create inserts a new analysis.
 func (r *PGRepo) Create(ctx context.Context, analysis Analysis) error {
 	const query = `
-INSERT INTO analyses (id, document_id, user_id, status, result, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)`
-	_, err := r.DB.ExecContext(ctx, query, analysis.ID, analysis.DocumentID, analysis.UserID, analysis.Status, nil, analysis.CreatedAt)
+INSERT INTO analyses (id, document_id, user_id, status, result, job_description, prompt_version, provider, model, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := r.DB.ExecContext(ctx, query, analysis.ID, analysis.DocumentID, analysis.UserID, analysis.Status, nil, analysis.JobDescription, analysis.PromptVersion, analysis.Provider, analysis.Model, analysis.CreatedAt)
 	return err
 }
 
 // GetByID returns an analysis by ID.
 func (r *PGRepo) GetByID(ctx context.Context, analysisID string) (Analysis, error) {
 	const query = `
-SELECT id, document_id, user_id, status, result, created_at
+SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model, created_at
 FROM analyses
 WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1`
 	var a Analysis
 	var result sql.NullString
-	err := r.DB.QueryRowContext(ctx, query, analysisID).Scan(&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &a.CreatedAt)
+	var jobDescription sql.NullString
+	var promptVersion sql.NullString
+	var provider sql.NullString
+	var model sql.NullString
+	err := r.DB.QueryRowContext(ctx, query, analysisID).Scan(&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model, &a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Analysis{}, ErrNotFound
@@ -42,6 +46,18 @@ LIMIT 1`
 		if err := json.Unmarshal([]byte(result.String), &a.Result); err == nil {
 			// keep result parsed
 		}
+	}
+	if jobDescription.Valid {
+		a.JobDescription = jobDescription.String
+	}
+	if promptVersion.Valid {
+		a.PromptVersion = promptVersion.String
+	}
+	if provider.Valid {
+		a.Provider = provider.String
+	}
+	if model.Valid {
+		a.Model = model.String
 	}
 	return a, nil
 }
@@ -90,7 +106,7 @@ func (r *PGRepo) ListByUser(ctx context.Context, userID string, limit, offset in
 	}
 
 	const query = `
-SELECT id, document_id, user_id, status, result, created_at
+SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model, created_at
 FROM analyses
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -106,7 +122,11 @@ LIMIT $2 OFFSET $3`
 	for rows.Next() {
 		var a Analysis
 		var result sql.NullString
-		if err := rows.Scan(&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &a.CreatedAt); err != nil {
+		var jobDescription sql.NullString
+		var promptVersion sql.NullString
+		var provider sql.NullString
+		var model sql.NullString
+		if err := rows.Scan(&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		if result.Valid {
@@ -114,6 +134,18 @@ LIMIT $2 OFFSET $3`
 			if err := json.Unmarshal([]byte(result.String), &a.Result); err != nil {
 				// ignore parse errors, keep nil
 			}
+		}
+		if jobDescription.Valid {
+			a.JobDescription = jobDescription.String
+		}
+		if promptVersion.Valid {
+			a.PromptVersion = promptVersion.String
+		}
+		if provider.Valid {
+			a.Provider = provider.String
+		}
+		if model.Valid {
+			a.Model = model.String
 		}
 		out = append(out, a)
 	}

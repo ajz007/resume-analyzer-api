@@ -41,6 +41,7 @@ func TestDocumentsUploadAndCurrent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	addGuestHeader(req)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
@@ -61,6 +62,7 @@ func TestDocumentsUploadAndCurrent(t *testing.T) {
 
 	// Fetch current document.
 	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/documents/current", nil)
+	addGuestHeader(reqGet)
 	respGet := httptest.NewRecorder()
 	router.ServeHTTP(respGet, reqGet)
 
@@ -78,4 +80,8 @@ func TestDocumentsUploadAndCurrent(t *testing.T) {
 	if current.FileName != "hello.txt" {
 		t.Fatalf("expected fileName hello.txt, got %s", current.FileName)
 	}
+}
+
+func addGuestHeader(req *http.Request) {
+	req.Header.Set("X-Guest-Id", "test-guest")
 }

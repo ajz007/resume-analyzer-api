@@ -3,6 +3,7 @@ package analyses
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,14 +18,19 @@ const (
 
 // Service contains business logic for analyses.
 type Service struct {
-	Repo  Repo
-	Usage *usage.Service
+	Repo     Repo
+	Usage    *usage.Service
+	Provider string
+	Model    string
 }
 
 // Create enqueues a new analysis and kicks off asynchronous completion.
-func (s *Service) Create(ctx context.Context, documentID, userID string) (Analysis, error) {
+func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription, promptVersion string) (Analysis, error) {
 	if documentID == "" || userID == "" {
 		return Analysis{}, errors.New("documentID and userID are required")
+	}
+	if promptVersion == "" {
+		promptVersion = "v1"
 	}
 
 	if s.Usage != nil {
@@ -38,11 +44,15 @@ func (s *Service) Create(ctx context.Context, documentID, userID string) (Analys
 	}
 
 	analysis := Analysis{
-		ID:         uuid.NewString(),
-		DocumentID: documentID,
-		UserID:     userID,
-		Status:     StatusQueued,
-		CreatedAt:  time.Now().UTC(),
+		ID:             uuid.NewString(),
+		DocumentID:     documentID,
+		UserID:         userID,
+		JobDescription: jobDescription,
+		PromptVersion:  promptVersion,
+		Provider:       normalizeProvider(s.Provider),
+		Model:          s.Model,
+		Status:         StatusQueued,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	if err := s.Repo.Create(ctx, analysis); err != nil {
@@ -74,6 +84,13 @@ func (s *Service) List(ctx context.Context, userID string, limit, offset int) ([
 		return nil, errors.New("userID is required")
 	}
 	return s.Repo.ListByUser(ctx, userID, limit, offset)
+}
+
+func normalizeProvider(provider string) string {
+	if strings.TrimSpace(provider) == "" {
+		return "openai"
+	}
+	return provider
 }
 
 func (s *Service) completeAsync(analysisID string) {
