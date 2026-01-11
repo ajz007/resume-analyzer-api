@@ -83,6 +83,123 @@ ON CONFLICT (user_id) DO UPDATE SET used = 0, resets_at = EXCLUDED.resets_at`, u
 	return Usage{Plan: "Starter", Limit: 10, Used: 0, ResetsAt: resetsAt}, nil
 }
 
+func (s *pgStore) CreateApplyRun(ctx context.Context, run ApplyRun) error {
+	const query = `
+INSERT INTO apply_runs (
+    id, user_id, analysis_id, status, auto_fixes_count, safe_rewrites_count,
+    blocked_rewrites_count, needs_input_count, placeholders_remaining, document_version_id, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	_, err := s.DB.ExecContext(ctx, query,
+		run.ID,
+		run.UserID,
+		run.AnalysisID,
+		run.Status,
+		run.AutoFixesCount,
+		run.SafeRewritesCount,
+		run.BlockedRewritesCount,
+		run.NeedsInputCount,
+		run.PlaceholdersRemaining,
+		nullableString(run.DocumentVersionID),
+		run.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) GetApplyRun(ctx context.Context, userID, runID string) (ApplyRun, error) {
+	const query = `
+SELECT id, user_id, analysis_id, status, auto_fixes_count, safe_rewrites_count,
+       blocked_rewrites_count, needs_input_count, placeholders_remaining, document_version_id, created_at
+FROM apply_runs
+WHERE id = $1 AND user_id = $2
+LIMIT 1`
+	var run ApplyRun
+	var documentVersionID sql.NullString
+	err := s.DB.QueryRowContext(ctx, query, runID, userID).Scan(
+		&run.ID,
+		&run.UserID,
+		&run.AnalysisID,
+		&run.Status,
+		&run.AutoFixesCount,
+		&run.SafeRewritesCount,
+		&run.BlockedRewritesCount,
+		&run.NeedsInputCount,
+		&run.PlaceholdersRemaining,
+		&documentVersionID,
+		&run.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ApplyRun{}, ErrApplyRunNotFound
+		}
+		return ApplyRun{}, err
+	}
+	if documentVersionID.Valid {
+		run.DocumentVersionID = documentVersionID.String
+	}
+	return run, nil
+}
+
+func (s *pgStore) UpdateApplyRun(ctx context.Context, update ApplyRunUpdate) error {
+	const query = `
+UPDATE apply_runs
+SET status = $1,
+    auto_fixes_count = $2,
+    safe_rewrites_count = $3,
+    blocked_rewrites_count = $4,
+    needs_input_count = $5,
+    placeholders_remaining = $6,
+    document_version_id = $7
+WHERE id = $8 AND user_id = $9`
+	res, err := s.DB.ExecContext(ctx, query,
+		update.Status,
+		update.AutoFixesCount,
+		update.SafeRewritesCount,
+		update.BlockedRewritesCount,
+		update.NeedsInputCount,
+		update.PlaceholdersRemaining,
+		nullableString(update.DocumentVersionID),
+		update.ID,
+		update.UserID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrApplyRunNotFound
+	}
+	return nil
+}
+
+func (s *pgStore) CreateDocumentVersion(ctx context.Context, version DocumentVersion) error {
+	const query = `
+INSERT INTO document_versions (
+    id, document_id, user_id, apply_run_id, file_name, mime_type, size_bytes, storage_key, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := s.DB.ExecContext(ctx, query,
+		version.ID,
+		version.DocumentID,
+		version.UserID,
+		nullableString(version.ApplyRunID),
+		version.FileName,
+		version.MimeType,
+		version.SizeBytes,
+		version.StorageKey,
+		version.CreatedAt,
+	)
+	return err
+}
+
+func nullableString(value string) sql.NullString {
+	if value == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: value, Valid: true}
+}
+
 func (s *pgStore) ensure(ctx context.Context, userID string) (Usage, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {

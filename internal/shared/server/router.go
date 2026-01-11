@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 
@@ -77,7 +78,6 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	} else {
 		usageSvc = usage.NewService()
 	}
-	usageHandler := usage.NewHandler(usageSvc)
 	var analysisRepo analyses.Repo
 	if sqlDB != nil {
 		analysisRepo = &analyses.PGRepo{DB: sqlDB}
@@ -91,6 +91,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		Model:    cfg.LLMModel,
 	}
 	analysisHandler := analyses.NewHandler(analysisSvc, docRepo)
+	usageHandler := usage.NewHandler(usageSvc, analysisAdapter{repo: analysisRepo}, docRepo, store)
 	googleAuthSvc := googleauth.NewGoogleService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, cfg.UIRedirectURL)
 
 	api := r.Group("/api/v1")
@@ -108,6 +109,27 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	}
 
 	return r
+}
+
+type analysisAdapter struct {
+	repo analyses.Repo
+}
+
+func (a analysisAdapter) GetByID(ctx context.Context, analysisID string) (usage.AnalysisRecord, error) {
+	analysis, err := a.repo.GetByID(ctx, analysisID)
+	if err != nil {
+		if errors.Is(err, analyses.ErrNotFound) {
+			return usage.AnalysisRecord{}, usage.ErrAnalysisNotFound
+		}
+		return usage.AnalysisRecord{}, err
+	}
+	return usage.AnalysisRecord{
+		ID:         analysis.ID,
+		UserID:     analysis.UserID,
+		DocumentID: analysis.DocumentID,
+		Status:     analysis.Status,
+		Result:     analysis.Result,
+	}, nil
 }
 
 // Addr normalizes the listen address.

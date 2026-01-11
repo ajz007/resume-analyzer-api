@@ -1,12 +1,20 @@
 package usage
 
-import "context"
+import (
+	"context"
+
+	resumeservice "resume-backend/resume/service"
+)
 
 type store interface {
 	Get(ctx context.Context, userID string) (Usage, error)
 	EnsurePeriod(ctx context.Context, userID string) (Usage, error)
 	Consume(ctx context.Context, userID string, n int) (Usage, error)
 	Reset(ctx context.Context, userID string) (Usage, error)
+	CreateApplyRun(ctx context.Context, run ApplyRun) error
+	GetApplyRun(ctx context.Context, userID, runID string) (ApplyRun, error)
+	UpdateApplyRun(ctx context.Context, update ApplyRunUpdate) error
+	CreateDocumentVersion(ctx context.Context, version DocumentVersion) error
 }
 
 // Service manages usage data via an underlying store.
@@ -57,4 +65,29 @@ func (s *Service) Consume(ctx context.Context, userID string, n int) (Usage, err
 // Reset sets usage to zero and resets the window.
 func (s *Service) Reset(ctx context.Context, userID string) (Usage, error) {
 	return s.store.Reset(ctx, userID)
+}
+
+// CreateApplyRun persists a new apply run record.
+func (s *Service) CreateApplyRun(ctx context.Context, run ApplyRun) error {
+	return s.store.CreateApplyRun(ctx, run)
+}
+
+// GetApplyRun fetches an apply run by ID for a user.
+func (s *Service) GetApplyRun(ctx context.Context, userID, runID string) (ApplyRun, error) {
+	return s.store.GetApplyRun(ctx, userID, runID)
+}
+
+// UpdateApplyRun updates apply run details.
+func (s *Service) UpdateApplyRun(ctx context.Context, update ApplyRunUpdate) error {
+	return s.store.UpdateApplyRun(ctx, update)
+}
+
+// CreateDocumentVersion persists a rendered resume version.
+func (s *Service) CreateDocumentVersion(ctx context.Context, version DocumentVersion) error {
+	return s.store.CreateDocumentVersion(ctx, version)
+}
+
+// BuildApplyPlan generates an ApplyPlan from analysis results.
+func (s *Service) BuildApplyPlan(analysis resumeservice.AnalysisResultV2_3) resumeservice.ApplyPlan {
+	return resumeservice.BuildApplyPlan(analysis)
 }

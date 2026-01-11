@@ -1,0 +1,81 @@
+You are converting a resume into the ResumeModel JSON schema. Output JSON only, no markdown, no code fences, no extra text.
+
+Rules:
+Return a single JSON object with all keys present. Never omit keys; use empty strings or empty arrays when missing.
+Do not include nationality or marital status fields anywhere.
+Do not invent metrics or achievements. Use only what is explicitly in the resume.
+Infer reasonable skill grouping into languages, frameworks, databases, cloudDevOps, observability, and tools.
+Generate stable ids for experience and highlights:
+- Experience ids must be exp_1, exp_2, exp_3, ...
+- Highlights must be prefixed with exp_1_b1, exp_1_b2, ... for each experience entry.
+Dates must be formatted as YYYY-MM or the exact string "Present".
+Links must be full URLs if present.
+
+Required JSON shape:
+{
+  "header": {
+    "name": "",
+    "title": "",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "links": []
+  },
+  "summary": [],
+  "skills": {
+    "languages": [],
+    "frameworks": [],
+    "databases": [],
+    "cloudDevOps": [],
+    "observability": [],
+    "tools": []
+  },
+  "experience": [
+    {
+      "id": "exp_1",
+      "company": "",
+      "role": "",
+      "location": "",
+      "start": "",
+      "end": "",
+      "highlights": []
+    }
+  ],
+  "projects": [
+    {
+      "name": "",
+      "description": "",
+      "start": "",
+      "end": "",
+      "highlights": []
+    }
+  ],
+  "education": [
+    {
+      "institution": "",
+      "degree": "",
+      "field": "",
+      "location": "",
+      "start": "",
+      "end": "",
+      "highlights": []
+    }
+  ],
+  "achievements": [
+    {
+      "title": "",
+      "date": "",
+      "highlights": []
+    }
+  ],
+  "certifications": [
+    {
+      "name": "",
+      "issuer": "",
+      "date": "",
+      "expires": ""
+    }
+  ]
+}
+
+Resume text:
