@@ -41,8 +41,9 @@ func main() {
 	if err != nil {
 		exitErr(fmt.Sprintf("read resume: %v", err))
 	}
+	fileName := filepath.Base(*resumePath)
 
-	resumeText, err := extract.ExtractTextFromBytes(context.Background(), resumeBytes, mimeType)
+	resumeText, err := extract.ExtractTextFromBytes(context.Background(), resumeBytes, mimeType, fileName)
 	if err != nil {
 		exitErr(fmt.Sprintf("extract resume text: %v", err))
 	}

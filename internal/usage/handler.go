@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"resume-backend/internal/documents"
+	"resume-backend/internal/generatedresumes"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
 	"resume-backend/internal/shared/storage/object"
@@ -25,15 +26,17 @@ type Handler struct {
 	AnalysisRepo AnalysisRepo
 	DocRepo      documents.DocumentsRepo
 	Store        object.ObjectStore
+	Generated    *generatedresumes.Service
 }
 
 // NewHandler constructs a Handler.
-func NewHandler(svc *Service, analysisRepo AnalysisRepo, docRepo documents.DocumentsRepo, store object.ObjectStore) *Handler {
+func NewHandler(svc *Service, analysisRepo AnalysisRepo, docRepo documents.DocumentsRepo, store object.ObjectStore, generatedResumeSvc *generatedresumes.Service) *Handler {
 	return &Handler{
 		Svc:          svc,
 		AnalysisRepo: analysisRepo,
 		DocRepo:      docRepo,
 		Store:        store,
+		Generated:    generatedResumeSvc,
 	}
 }
 

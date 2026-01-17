@@ -15,3 +15,11 @@ Flags:
 - `--out`: Write raw JSON to a file (optional).
 - `--provider`: LLM provider (default from env/config).
 - `--model`: LLM model (default from env/config).
+
+## API
+
+### Download generated resume
+
+```bash
+curl -L --fail-with-body -o out.docx http://localhost:8080/api/v1/generated-resumes/<id>/download
+```

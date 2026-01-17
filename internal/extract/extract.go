@@ -1,16 +1,17 @@
 package extract
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/ledongthuc/pdf"
-	"github.com/nguyenthenguyen/docx"
 
 	"resume-backend/internal/shared/storage/object"
 )
@@ -22,7 +23,7 @@ const (
 
 // ExtractText pulls text from a stored object and persists a derived .extracted.txt copy.
 // Libraries used: github.com/ledongthuc/pdf (PDF) and github.com/nguyenthenguyen/docx (DOCX).
-func ExtractText(ctx context.Context, store object.ObjectStore, fileKey string, mimeType string) (string, error) {
+func ExtractText(ctx context.Context, store object.ObjectStore, fileKey string, mimeType string, fileName string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -38,7 +39,7 @@ func ExtractText(ctx context.Context, store object.ObjectStore, fileKey string, 
 		return "", fmt.Errorf("extract text key=%s mime=%s: read: %w", fileKey, mimeType, err)
 	}
 
-	text, err := ExtractTextFromBytes(ctx, raw, mimeType)
+	text, err := ExtractTextFromBytes(ctx, raw, mimeType, fileName)
 	if err != nil {
 		return "", fmt.Errorf("extract text key=%s mime=%s: %w", fileKey, mimeType, err)
 	}
@@ -52,17 +53,18 @@ func ExtractText(ctx context.Context, store object.ObjectStore, fileKey string, 
 }
 
 // ExtractTextFromBytes extracts text from an in-memory payload.
-func ExtractTextFromBytes(ctx context.Context, data []byte, mimeType string) (string, error) {
+func ExtractTextFromBytes(ctx context.Context, data []byte, mimeType string, fileName string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	switch mimeType {
+	normalized := normalizeMimeType(mimeType, fileName, data)
+	switch normalized {
 	case mimePDF:
 		return extractPDF(data)
 	case mimeDOCX:
 		return extractDOCX(data)
 	default:
-		return "", fmt.Errorf("unsupported mime type: %s", mimeType)
+		return "", fmt.Errorf("unsupported mime type: %s", normalized)
 	}
 }
 
@@ -98,15 +100,39 @@ func extractPDF(data []byte) (string, error) {
 }
 
 func extractDOCX(data []byte) (string, error) {
-	reader := bytes.NewReader(data)
-	doc, err := docx.ReadDocxFromMemory(reader, int64(len(data)))
+	if len(data) == 0 {
+		return "", errors.New("empty docx data")
+	}
+	readerAt := bytes.NewReader(data)
+	zr, err := zip.NewReader(readerAt, int64(len(data)))
 	if err != nil {
 		return "", err
 	}
-	defer doc.Close()
 
-	raw := doc.Editable().GetContent()
-	return stripDocxXML(raw), nil
+	var docFile *zip.File
+	for _, f := range zr.File {
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+		if name == "word/document.xml" {
+			docFile = f
+			break
+		}
+	}
+	if docFile == nil {
+		return "", errors.New("document.xml file not found")
+	}
+
+	rc, err := docFile.Open()
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		return "", err
+	}
+
+	return stripDocxXML(string(raw)), nil
 }
 
 func stripDocxXML(raw string) string {
@@ -132,4 +158,50 @@ func stripDocxXML(raw string) string {
 		}
 	}
 	return strings.TrimSpace(buf.String())
+}
+
+func normalizeMimeType(mimeType string, fileName string, data []byte) string {
+	clean := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	if clean != "application/zip" {
+		return clean
+	}
+
+	if mapped := mapOOXMLFromZip(data); mapped != "" {
+		return mapped
+	}
+
+	ext := strings.ToLower(filepath.Ext(fileName))
+	switch ext {
+	case ".docx":
+		return mimeDOCX
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	default:
+		return clean
+	}
+}
+
+func mapOOXMLFromZip(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	readerAt := bytes.NewReader(data)
+	zr, err := zip.NewReader(readerAt, int64(len(data)))
+	if err != nil {
+		return ""
+	}
+	for _, f := range zr.File {
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+		switch name {
+		case "word/document.xml":
+			return mimeDOCX
+		case "xl/workbook.xml":
+			return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+		case "ppt/presentation.xml":
+			return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+		}
+	}
+	return ""
 }

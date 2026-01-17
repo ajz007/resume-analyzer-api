@@ -12,7 +12,9 @@ import (
 
 	"resume-backend/internal/analyses"
 	googleauth "resume-backend/internal/auth"
+	"resume-backend/internal/applies"
 	"resume-backend/internal/documents"
+	"resume-backend/internal/generatedresumes"
 	"resume-backend/internal/llm"
 	openai "resume-backend/internal/llm/openai"
 	"resume-backend/internal/shared/config"
@@ -87,6 +89,12 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	} else {
 		analysisRepo = analyses.NewMemoryRepo()
 	}
+	var generatedResumeRepo generatedresumes.Repo
+	if sqlDB != nil {
+		generatedResumeRepo = &generatedresumes.PGRepo{DB: sqlDB}
+	} else {
+		generatedResumeRepo = generatedresumes.NewMemoryRepo()
+	}
 	llmClient := llm.Client(llm.PlaceholderClient{})
 	if cfg.LLMProvider == "openai" {
 		openaiClient, err := openai.NewClient(os.Getenv("OPENAI_API_KEY"), cfg.LLMModel)
@@ -94,6 +102,14 @@ func NewRouter(cfg config.Config) *gin.Engine {
 			log.Fatalf("failed to initialize openai client: %v", err)
 		}
 		llmClient = openaiClient
+	}
+	applyLLMClient := applies.LLMClient(promptPlaceholder{})
+	if cfg.LLMProvider == "openai" {
+		promptClient, err := openai.NewPromptClient(os.Getenv("OPENAI_API_KEY"), cfg.LLMModel)
+		if err != nil {
+			log.Fatalf("failed to initialize openai prompt client: %v", err)
+		}
+		applyLLMClient = promptClient
 	}
 
 	analysisSvc := &analyses.Service{
@@ -106,7 +122,21 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		Model:    cfg.LLMModel,
 	}
 	analysisHandler := analyses.NewHandler(analysisSvc, docRepo)
-	usageHandler := usage.NewHandler(usageSvc, analysisAdapter{repo: analysisRepo}, docRepo, store)
+	generatedResumeSvc := &generatedresumes.Service{
+		Repo:         generatedResumeRepo,
+		AnalysisRepo: analysisAdapter{repo: analysisRepo},
+		DocRepo:      docRepo,
+		Store:        store,
+	}
+	usageHandler := usage.NewHandler(usageSvc, analysisAdapter{repo: analysisRepo}, docRepo, store, generatedResumeSvc)
+	applySvc := &applies.Service{
+		AnalysisRepo:  analysisRepo,
+		DocumentsRepo: docRepo,
+		GeneratedRepo: generatedResumeRepo,
+		Store:         store,
+		LLM:           applyLLMClient,
+	}
+	applyHandler := applies.NewHandler(applySvc, generatedResumeRepo, store)
 	googleAuthSvc := googleauth.NewGoogleService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, cfg.UIRedirectURL)
 
 	api := r.Group("/api/v1")
@@ -118,6 +148,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	docHandler.RegisterRoutes(api)
 	analysisHandler.RegisterRoutes(api)
 	usageHandler.RegisterRoutes(api)
+	applyHandler.RegisterRoutes(api)
 	if cfg.Env == "dev" {
 		dev := api.Group("/dev")
 		usageHandler.RegisterDevRoutes(dev)
@@ -145,6 +176,31 @@ func (a analysisAdapter) GetByID(ctx context.Context, analysisID string) (usage.
 		Status:     analysis.Status,
 		Result:     analysis.Result,
 	}, nil
+}
+
+func (a analysisAdapter) GetAnalysisByID(ctx context.Context, analysisID string) (generatedresumes.AnalysisRecord, error) {
+	analysis, err := a.repo.GetByID(ctx, analysisID)
+	if err != nil {
+		if errors.Is(err, analyses.ErrNotFound) {
+			return generatedresumes.AnalysisRecord{}, generatedresumes.ErrNotFound
+		}
+		return generatedresumes.AnalysisRecord{}, err
+	}
+	return generatedresumes.AnalysisRecord{
+		ID:         analysis.ID,
+		UserID:     analysis.UserID,
+		DocumentID: analysis.DocumentID,
+		Status:     analysis.Status,
+		Result:     analysis.Result,
+	}, nil
+}
+
+type promptPlaceholder struct{}
+
+func (promptPlaceholder) Complete(ctx context.Context, prompt string) (string, error) {
+	_ = ctx
+	_ = prompt
+	return "", errors.New("llm prompt client not configured")
 }
 
 // Addr normalizes the listen address.

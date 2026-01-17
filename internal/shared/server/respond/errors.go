@@ -20,6 +20,11 @@ type ErrorResponse struct {
 
 // Error sends a standardized error response.
 func Error(c *gin.Context, status int, code, message string, details interface{}) {
+	if c.Writer.Written() {
+		c.Abort()
+		return
+	}
+
 	fields := map[string]any{
 		"status":     status,
 		"code":       code,
@@ -36,6 +41,7 @@ func Error(c *gin.Context, status int, code, message string, details interface{}
 	}
 	telemetry.Error("http.error", fields)
 
+	c.Header("Content-Type", "application/json; charset=utf-8")
 	c.AbortWithStatusJSON(status, ErrorResponse{
 		Error: ErrorBody{
 			Code:    code,

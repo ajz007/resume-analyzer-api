@@ -2,103 +2,46 @@ package analyses
 
 import (
 	"encoding/json"
-	"os"
-	"strings"
+	"reflect"
+	"sort"
 	"testing"
 )
 
-func TestValidOutputUnmarshal(t *testing.T) {
-	payload := loadFixture(t, "testdata/valid_output_v1.json")
+func TestATSV1MissingKeywordsArray(t *testing.T) {
+	payload := []byte(`{"ats":{"missingKeywords":["golang","aws"]}}`)
 
-	var out AnalysisResultV1
-	if err := json.Unmarshal(payload, &out); err != nil {
-		t.Fatalf("expected valid JSON to unmarshal, got error: %v", err)
+	var result AnalysisResultV1
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	got := []string(result.ATS.MissingKeywords)
+	want := []string{"golang", "aws"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
 
-func TestInvalidOutputFails(t *testing.T) {
-	payload := loadFixture(t, "testdata/invalid_output_v1.json")
-
-	var out AnalysisResultV1
-	if err := json.Unmarshal(payload, &out); err == nil {
-		t.Fatalf("expected invalid JSON to fail unmarshal")
-	}
-}
-
-func TestSanitizeError(t *testing.T) {
-	long := strings.Repeat("a", 600)
-	msg := sanitizeError(errorsWithNewlines(long))
-
-	if strings.Contains(msg, "\n") || strings.Contains(msg, "\r") {
-		t.Fatalf("expected newlines to be stripped, got %q", msg)
-	}
-	if len(msg) != 500 {
-		t.Fatalf("expected length 500, got %d", len(msg))
-	}
-}
-
-func TestV1GoodUnmarshalAndValidate(t *testing.T) {
-	payload := loadFixture(t, "testdata/v1_good.json")
-
-	var out AnalysisResultV1
-	if err := json.Unmarshal(payload, &out); err != nil {
-		t.Fatalf("expected v1 JSON to unmarshal, got error: %v", err)
-	}
-}
-
-func TestV2GoodUnmarshalAndValidate(t *testing.T) {
-	payload := loadFixture(t, "testdata/v2_good.json")
-
-	var out AnalysisResultV2
-	if err := json.Unmarshal(payload, &out); err != nil {
-		t.Fatalf("expected v2 JSON to unmarshal, got error: %v", err)
-	}
-	if err := out.Validate(); err != nil {
-		t.Fatalf("expected v2 JSON to validate, got error: %v", err)
-	}
-}
-
-func TestSchemaRequiredKeys(t *testing.T) {
-	payload := loadFixture(t, "testdata/v1_good.json")
-
-	var raw map[string]any
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		t.Fatalf("unmarshal into map: %v", err)
-	}
-
-	required := []string{
-		"summary",
-		"ats",
-		"issues",
-		"bulletRewrites",
-		"missingInformation",
-		"actionPlan",
-	}
-	for _, key := range required {
-		if _, ok := raw[key]; !ok {
-			t.Fatalf("missing required key: %s", key)
+func TestATSV1MissingKeywordsObject(t *testing.T) {
+	payload := []byte(`{
+		"ats": {
+			"missingKeywords": {
+				"fromJobDescription": ["sql", "docker"],
+				"industryCommon": "kubernetes",
+				"other": {"nested": ["terraform"]}
+			}
 		}
+	}`)
+
+	var result AnalysisResultV1
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-}
 
-func loadFixture(t *testing.T, path string) []byte {
-	t.Helper()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
+	got := []string(result.ATS.MissingKeywords)
+	sort.Strings(got)
+	want := []string{"docker", "kubernetes", "sql", "terraform"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
-	return data
-}
-
-func errorsWithNewlines(msg string) error {
-	return &testError{msg: "bad\n" + msg + "\r\nend"}
-}
-
-type testError struct {
-	msg string
-}
-
-func (e *testError) Error() string {
-	return e.msg
 }

@@ -1,5 +1,11 @@
 package analyses
 
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+)
+
 // JSON Schema (v1):
 // {
 //   "summary": {
@@ -52,9 +58,9 @@ type SummaryV1 struct {
 }
 
 type ATSV1 struct {
-	Score            float64  `json:"score"`
-	MissingKeywords  []string `json:"missingKeywords"`
-	FormattingIssues []string `json:"formattingIssues"`
+	Score            float64    `json:"score"`
+	MissingKeywords  StringList `json:"missingKeywords"`
+	FormattingIssues []string   `json:"formattingIssues"`
 }
 
 type IssueSeverityV1 string
@@ -85,4 +91,47 @@ type ActionPlanV1 struct {
 	QuickWins    []string `json:"quickWins"`
 	MediumEffort []string `json:"mediumEffort"`
 	DeepFixes    []string `json:"deepFixes"`
+}
+
+type StringList []string
+
+func (s *StringList) UnmarshalJSON(data []byte) error {
+	clean := bytes.TrimSpace(data)
+	if len(clean) == 0 || bytes.Equal(clean, []byte("null")) {
+		*s = nil
+		return nil
+	}
+
+	var list []string
+	if err := json.Unmarshal(clean, &list); err == nil {
+		*s = list
+		return nil
+	}
+
+	var raw any
+	if err := json.Unmarshal(clean, &raw); err != nil {
+		return err
+	}
+	var flattened []string
+	collectStrings(raw, &flattened)
+	*s = flattened
+	return nil
+}
+
+func collectStrings(v any, out *[]string) {
+	switch val := v.(type) {
+	case string:
+		trimmed := strings.TrimSpace(val)
+		if trimmed != "" {
+			*out = append(*out, trimmed)
+		}
+	case []any:
+		for _, item := range val {
+			collectStrings(item, out)
+		}
+	case map[string]any:
+		for _, item := range val {
+			collectStrings(item, out)
+		}
+	}
 }
