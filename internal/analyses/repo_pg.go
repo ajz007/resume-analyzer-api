@@ -89,22 +89,22 @@ func (r *PGRepo) UpdateStatusResultAndError(ctx context.Context, analysisID, sta
 	const query = `
 UPDATE analyses
 SET status = $1,
-    result = CASE WHEN $2 IS NULL THEN result ELSE $2::jsonb END,
-    error_message = CASE WHEN $3 IS NULL THEN error_message ELSE $3 END,
+    result = COALESCE($2::jsonb, result),
+    error_message = COALESCE($3::text, error_message),
     started_at = CASE
-        WHEN $4 IS NOT NULL THEN $4
+        WHEN $4::timestamptz IS NOT NULL THEN $4::timestamptz
         WHEN $1 = 'processing' AND started_at IS NULL THEN now()
         ELSE started_at
     END,
     completed_at = CASE
-        WHEN $5 IS NOT NULL THEN $5
+        WHEN $5::timestamptz IS NOT NULL THEN $5::timestamptz
         WHEN ($1 = 'completed' OR $1 = 'failed') AND completed_at IS NULL THEN now()
         ELSE completed_at
     END,
     updated_at = now()
-WHERE id = $6`
+WHERE id = $6::uuid`
 
-	var payload []byte
+	var payload any
 	var err error
 	if result != nil {
 		payload, err = json.Marshal(result)

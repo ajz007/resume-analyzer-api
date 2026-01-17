@@ -63,7 +63,7 @@ func Auth(env string) gin.HandlerFunc {
 
 		guestID := strings.TrimSpace(c.GetHeader("X-Guest-Id"))
 		if guestID == "" {
-			respond.Error(c, http.StatusBadRequest, "validation_error", "Missing identity", nil)
+			respond.Error(c, http.StatusUnauthorized, "unauthorized", "Missing identity", nil)
 			return
 		}
 

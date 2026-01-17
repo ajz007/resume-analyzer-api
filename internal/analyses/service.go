@@ -106,8 +106,18 @@ func normalizeProvider(provider string) string {
 }
 
 func (s *Service) completeAsync(analysisID string) {
+	ctx := context.Background()
+	defer func() {
+		if r := recover(); r != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("panic: %v", r))
+		}
+	}()
 	startedAt := time.Now().UTC()
-	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusProcessing, nil, nil, &startedAt, nil)
+	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusProcessing, nil, nil, &startedAt, nil); err != nil {
+		// THIS is the bug you’re currently hiding
+		s.failAnalysis(analysisID, fmt.Errorf("set processing failed: %w", err))
+		return
+	}
 
 	analysis, err := s.Repo.GetByID(context.Background(), analysisID)
 	if err != nil {
@@ -131,7 +141,7 @@ func (s *Service) completeAsync(analysisID string) {
 
 	extractedKey := doc.ExtractedTextKey
 	if extractedKey == "" {
-		if _, err := extract.ExtractText(context.Background(), s.Store, doc.StorageKey, doc.MimeType); err != nil {
+		if _, err := extract.ExtractText(context.Background(), s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err))
 			return
 		}
@@ -207,13 +217,18 @@ func (s *Service) completeAsync(analysisID string) {
 	}
 
 	completedAt := time.Now().UTC()
-	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusCompleted, result, nil, nil, &completedAt)
+	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusCompleted, result, nil, nil, &completedAt); err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("set completed failed: %w", err))
+		return
+	}
 }
 
 func (s *Service) failAnalysis(analysisID string, err error) {
 	msg := sanitizeError(err)
 	completedAt := time.Now().UTC()
-	_ = s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &msg, nil, &completedAt)
+	if updateErr := s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &msg, nil, &completedAt); updateErr != nil {
+		fmt.Printf("failAnalysis: update failed id=%s err=%v orig=%v\n", analysisID, updateErr, err)
+	}
 }
 
 func sanitizeError(err error) string {

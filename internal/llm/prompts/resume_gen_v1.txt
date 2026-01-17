@@ -1,0 +1,85 @@
+You are generating a ResumeModel JSON. Output JSON only (no markdown) and never omit keys.
+Use empty strings/arrays when unknown. Do NOT invent metrics or contact details; use placeholders or omit.
+
+Schema:
+{
+  "header": {
+    "name": "string",
+    "title": "string",
+    "email": "string",
+    "phone": "string",
+    "location": "string",
+    "links": ["string"],
+    "nationality": "",
+    "maritalStatus": ""
+  },
+  "summary": ["string"],
+  "skills": {
+    "languages": ["string"],
+    "frameworks": ["string"],
+    "databases": ["string"],
+    "cloudDevOps": ["string"],
+    "observability": ["string"],
+    "tools": ["string"]
+  },
+  "experience": [
+    {
+      "id": "string",
+      "company": "string",
+      "role": "string",
+      "location": "string",
+      "start": "YYYY-MM or Present or empty",
+      "end": "YYYY-MM or Present or empty",
+      "highlights": ["string"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "string",
+      "description": "string",
+      "start": "YYYY-MM or Present or empty",
+      "end": "YYYY-MM or Present or empty",
+      "highlights": ["string"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "string",
+      "degree": "string",
+      "field": "string",
+      "location": "string",
+      "start": "YYYY-MM or empty",
+      "end": "YYYY-MM or empty",
+      "highlights": ["string"]
+    }
+  ],
+  "achievements": [
+    {
+      "title": "string",
+      "date": "YYYY-MM or empty",
+      "highlights": ["string"]
+    }
+  ],
+  "certifications": [
+    {
+      "name": "string",
+      "issuer": "string",
+      "date": "YYYY-MM or empty",
+      "expires": "YYYY-MM or empty"
+    }
+  ]
+}
+
+Rules:
+- header.name must be non-empty. If contact info is unknown, use placeholders like "[email]" or "[phone]" or leave blank.
+- summary must have 0-4 bullets.
+- each experience.highlights must have 0-5 bullets.
+- Do NOT invent metrics; if missing use placeholders like "X", "X%", or "[metric]".
+- Do NOT invent contact details; use placeholders or omit.
+- Keep nationality and maritalStatus empty.
+
+Resume text:
+{{RESUME_TEXT}}
+
+Analysis JSON:
+{{ANALYSIS_JSON}}
