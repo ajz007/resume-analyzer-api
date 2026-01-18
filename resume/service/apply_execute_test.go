@@ -4,11 +4,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"resume-backend/resume/contract"
 )
 
 type mockApplyLLM struct {
@@ -78,7 +81,7 @@ func TestExecuteApplyRewritesAndDraftStatus(t *testing.T) {
 
 	result, err := ExecuteApply(context.Background(), "sample resume text", analysis, ApplyHeaderInputs{
 		Email: "user@example.com",
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("ExecuteApply failed: %v", err)
 	}
@@ -103,6 +106,30 @@ func TestExecuteApplyRewritesAndDraftStatus(t *testing.T) {
 	assertNotContains(t, documentXML, "Old bullet")
 	assertNotContains(t, documentXML, "Nationality: India")
 	assertContains(t, documentXML, "user@example.com")
+}
+
+func TestExecuteApplyStrictModeMissingContact(t *testing.T) {
+	llmResponse := `{"header":{"name":"Test User","title":"","email":"","phone":"","location":"","links":[]},"summary":[],"skills":{"languages":[],"frameworks":[],"databases":[],"cloudDevOps":[],"observability":[],"tools":[]},"experience":[],"projects":[],"education":[],"achievements":[],"certifications":[]}`
+
+	prevClient := Client
+	Client = &mockApplyLLM{response: llmResponse}
+	defer func() {
+		Client = prevClient
+	}()
+
+	analysis := AnalysisResultV2_3{}
+
+	_, err := ExecuteApply(context.Background(), "sample resume text", analysis, ApplyHeaderInputs{}, true)
+	if err == nil {
+		t.Fatalf("expected strict mode error")
+	}
+	var missing contract.MissingFieldsError
+	if !errors.As(err, &missing) {
+		t.Fatalf("expected MissingFieldsError, got %T", err)
+	}
+	if len(missing.Fields) == 0 {
+		t.Fatalf("expected missing fields, got none")
+	}
 }
 
 func readDocumentXML(docxBytes []byte) (string, error) {

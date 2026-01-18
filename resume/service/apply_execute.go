@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"resume-backend/resume/contract"
 	"resume-backend/resume/model"
 	"resume-backend/resume/render"
+	"resume-backend/resume/skills"
 )
 
 const (
@@ -34,7 +36,7 @@ type ApplyExecutionResult struct {
 }
 
 // ExecuteApply regenerates a resume with fixes and rewrites applied.
-func ExecuteApply(ctx context.Context, resumeText string, analysis AnalysisResultV2_3, headerInputs ApplyHeaderInputs) (ApplyExecutionResult, error) {
+func ExecuteApply(ctx context.Context, resumeText string, analysis AnalysisResultV2_3, headerInputs ApplyHeaderInputs, strict bool) (ApplyExecutionResult, error) {
 	plan := BuildApplyPlan(analysis)
 
 	resumeModel, err := BuildResumeModel(ctx, resumeText)
@@ -45,6 +47,11 @@ func ExecuteApply(ctx context.Context, resumeText string, analysis AnalysisResul
 	autoFixesApplied := applyAutoFixes(&resumeModel, plan.AutoFixes)
 	safeRewritesApplied := applySafeRewrites(&resumeModel, plan.SafeRewrites)
 	applyHeaderInputs(&resumeModel, headerInputs)
+	applySkills(&resumeModel, analysis)
+
+	if err := contract.Enforce(&resumeModel, strict); err != nil {
+		return ApplyExecutionResult{}, err
+	}
 
 	if err := resumeModel.Validate(); err != nil {
 		return ApplyExecutionResult{}, err
@@ -69,6 +76,20 @@ func ExecuteApply(ctx context.Context, resumeText string, analysis AnalysisResul
 		Status:                status,
 		Plan:                  plan,
 	}, nil
+}
+
+func applySkills(resumeModel *model.ResumeModel, analysis AnalysisResultV2_3) {
+	skillLines := skills.BuildSkillLines(
+		resumeModel.Skills,
+		analysis.ATS.MissingKeywords.IndustryCommon,
+		skills.DefaultMaxSkills,
+		skills.DefaultMissingKeywords,
+		skills.DefaultSkillDisplayLines,
+	)
+	if len(skillLines) == 0 {
+		return
+	}
+	resumeModel.Skills = model.ResumeSkills{Tools: skillLines}
 }
 
 func applyHeaderInputs(resumeModel *model.ResumeModel, inputs ApplyHeaderInputs) {

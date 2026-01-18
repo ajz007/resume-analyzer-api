@@ -17,6 +17,7 @@ import (
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
 	"resume-backend/internal/shared/storage/object"
+	"resume-backend/resume/contract"
 	resumeservice "resume-backend/resume/service"
 )
 
@@ -96,6 +97,7 @@ func (h *Handler) resetUsage(c *gin.Context) {
 
 type applyExecuteRequest struct {
 	Header applyHeaderInput `json:"header"`
+	Strict bool             `json:"strict"`
 }
 
 type applyHeaderInput struct {
@@ -248,8 +250,13 @@ func (h *Handler) executeApply(c *gin.Context) {
 		Phone:    req.Header.Phone,
 		Location: req.Header.Location,
 		Links:    req.Header.Links,
-	})
+	}, req.Strict)
 	if err != nil {
+		var missing contract.MissingFieldsError
+		if errors.As(err, &missing) {
+			respond.Error(c, http.StatusBadRequest, "missing_required_fields", "missing required fields", missing.Fields)
+			return
+		}
 		respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to execute apply flow", nil)
 		return
 	}

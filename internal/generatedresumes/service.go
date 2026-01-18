@@ -86,7 +86,7 @@ func (s *Service) CreateFromAnalysis(ctx context.Context, userID, analysisID, te
 		return GeneratedResume{}, ErrInvalidInput
 	}
 
-	execResult, err := resumeservice.ExecuteApply(ctx, string(raw), result, resumeservice.ApplyHeaderInputs{})
+	execResult, err := resumeservice.ExecuteApply(ctx, string(raw), result, resumeservice.ApplyHeaderInputs{}, false)
 	if err != nil {
 		return GeneratedResume{}, err
 	}

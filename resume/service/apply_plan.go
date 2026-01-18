@@ -6,6 +6,7 @@ import "sort"
 type AnalysisResultV2_3 struct {
 	Issues         []AnalysisIssue `json:"issues"`
 	BulletRewrites []BulletRewrite `json:"bulletRewrites"`
+	ATS            AnalysisATS     `json:"ats"`
 }
 
 // AnalysisIssue represents a detected issue in the resume.
@@ -25,6 +26,17 @@ type BulletRewrite struct {
 	MetricsSource      string   `json:"metricsSource"`
 	PlaceholdersNeeded []string `json:"placeholdersNeeded"`
 	ClaimSupport       string   `json:"claimSupport"`
+}
+
+// AnalysisATS captures ATS-specific analysis data.
+type AnalysisATS struct {
+	MissingKeywords MissingKeywords `json:"missingKeywords"`
+}
+
+// MissingKeywords captures ATS keyword gaps.
+type MissingKeywords struct {
+	FromJobDescription []string `json:"fromJobDescription"`
+	IndustryCommon     []string `json:"industryCommon"`
 }
 
 // ApplyPlan is the actionable output derived from AnalysisResultV2_3.
