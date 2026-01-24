@@ -99,6 +99,102 @@ func (r *MemoryRepo) UpdateStatusResultAndError(ctx context.Context, analysisID,
 	return nil
 }
 
+// UpdateAnalysisRaw stores the raw analysis payload.
+func (r *MemoryRepo) UpdateAnalysisRaw(ctx context.Context, analysisID string, raw any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	analysis, ok := r.byID[analysisID]
+	if !ok {
+		return ErrNotFound
+	}
+	if raw != nil {
+		analysis.AnalysisRaw = raw
+	}
+	analysis.UpdatedAt = time.Now().UTC()
+	r.byID[analysisID] = analysis
+
+	userAnalyses := r.byUser[analysis.UserID]
+	for i := range userAnalyses {
+		if userAnalyses[i].ID == analysisID {
+			userAnalyses[i] = analysis
+			break
+		}
+	}
+	r.byUser[analysis.UserID] = userAnalyses
+	return nil
+}
+
+// UpdateAnalysisResult stores the normalized analysis result and completion timestamp.
+func (r *MemoryRepo) UpdateAnalysisResult(ctx context.Context, analysisID string, result map[string]any, completedAt *time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	analysis, ok := r.byID[analysisID]
+	if !ok {
+		return ErrNotFound
+	}
+	if result != nil {
+		analysis.Result = result
+	}
+	analysis.Status = StatusCompleted
+	if completedAt != nil {
+		analysis.AnalysisCompletedAt = completedAt
+		analysis.CompletedAt = completedAt
+	} else if analysis.AnalysisCompletedAt == nil {
+		now := time.Now().UTC()
+		analysis.AnalysisCompletedAt = &now
+		analysis.CompletedAt = &now
+	}
+	analysis.UpdatedAt = time.Now().UTC()
+	r.byID[analysisID] = analysis
+
+	userAnalyses := r.byUser[analysis.UserID]
+	for i := range userAnalyses {
+		if userAnalyses[i].ID == analysisID {
+			userAnalyses[i] = analysis
+			break
+		}
+	}
+	r.byUser[analysis.UserID] = userAnalyses
+	return nil
+}
+
+// UpdatePromptMetadata updates analysis_version and prompt_hash fields.
+func (r *MemoryRepo) UpdatePromptMetadata(ctx context.Context, analysisID, analysisVersion, promptHash string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	analysis, ok := r.byID[analysisID]
+	if !ok {
+		return ErrNotFound
+	}
+	if analysisVersion != "" {
+		analysis.AnalysisVersion = analysisVersion
+	}
+	if promptHash != "" {
+		analysis.PromptHash = promptHash
+	}
+	analysis.UpdatedAt = time.Now().UTC()
+	r.byID[analysisID] = analysis
+
+	userAnalyses := r.byUser[analysis.UserID]
+	for i := range userAnalyses {
+		if userAnalyses[i].ID == analysisID {
+			userAnalyses[i] = analysis
+			break
+		}
+	}
+	r.byUser[analysis.UserID] = userAnalyses
+	return nil
+}
+
 // ListByUser returns analyses for a user, newest first, with limit/offset.
 func (r *MemoryRepo) ListByUser(ctx context.Context, userID string, limit, offset int) ([]Analysis, error) {
 	if err := ctx.Err(); err != nil {

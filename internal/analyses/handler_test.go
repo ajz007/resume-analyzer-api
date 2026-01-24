@@ -24,7 +24,16 @@ func TestStartAnalysisDefaults(t *testing.T) {
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, userID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+documentID+"/analyze", nil)
+	payload := map[string]string{
+		"jobDescription": strings.Repeat("a", 300),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+documentID+"/analyze", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	addGuestHeader(req)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
@@ -47,8 +56,8 @@ func TestStartAnalysisDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get analysis: %v", err)
 	}
-	if analysis.JobDescription != "" {
-		t.Fatalf("expected empty jobDescription, got %q", analysis.JobDescription)
+	if analysis.JobDescription == "" {
+		t.Fatalf("expected jobDescription to be stored, got empty")
 	}
 	if analysis.PromptVersion != "v2_1" {
 		t.Fatalf("expected promptVersion v2_1, got %q", analysis.PromptVersion)
@@ -62,8 +71,9 @@ func TestStartAnalysisWithBody(t *testing.T) {
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, userID)
 
+	jobDescription := strings.Repeat("a", 300)
 	payload := map[string]string{
-		"jobDescription": "hello",
+		"jobDescription": jobDescription,
 		"promptVersion":  "v2",
 	}
 	body, err := json.Marshal(payload)
@@ -95,8 +105,8 @@ func TestStartAnalysisWithBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get analysis: %v", err)
 	}
-	if analysis.JobDescription != "hello" {
-		t.Fatalf("expected jobDescription hello, got %q", analysis.JobDescription)
+	if analysis.JobDescription != jobDescription {
+		t.Fatalf("expected jobDescription to match payload, got %q", analysis.JobDescription)
 	}
 	if analysis.PromptVersion != "v2" {
 		t.Fatalf("expected promptVersion v2, got %q", analysis.PromptVersion)

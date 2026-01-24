@@ -21,6 +21,7 @@ type AnalyzeInput struct {
 
 type fixJSONKey struct{}
 type extraSystemKey struct{}
+type promptHashKey struct{}
 
 // WithFixJSON returns a context signaling a fix-JSON retry with the given raw output.
 func WithFixJSON(ctx context.Context, raw string) context.Context {
@@ -44,6 +45,18 @@ func ExtraSystemMessageFromContext(ctx context.Context) (string, bool) {
 	val := ctx.Value(extraSystemKey{})
 	msg, ok := val.(string)
 	return msg, ok
+}
+
+// WithPromptHashCapture attaches a sink for the prompt hash computed by the LLM client.
+func WithPromptHashCapture(ctx context.Context, out *string) context.Context {
+	return context.WithValue(ctx, promptHashKey{}, out)
+}
+
+// PromptHashSinkFromContext returns the prompt hash sink, if any.
+func PromptHashSinkFromContext(ctx context.Context) (*string, bool) {
+	val := ctx.Value(promptHashKey{})
+	ptr, ok := val.(*string)
+	return ptr, ok
 }
 
 // ErrNotImplemented is returned by the placeholder client.

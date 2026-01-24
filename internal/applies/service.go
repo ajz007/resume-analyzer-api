@@ -17,8 +17,10 @@ import (
 	"resume-backend/internal/generatedresumes"
 	"resume-backend/internal/llm"
 	"resume-backend/internal/shared/storage/object"
+	"resume-backend/resume/contract"
 	"resume-backend/resume/model"
 	"resume-backend/resume/render"
+	"resume-backend/resume/skills"
 )
 
 const defaultTemplateID = "resume_modern_ats_v1"
@@ -47,7 +49,7 @@ type Service struct {
 }
 
 // Apply generates, renders, and stores a resume for an analysis.
-func (s *Service) Apply(ctx context.Context, userID, analysisID, templateID string) (generatedresumes.GeneratedResume, error) {
+func (s *Service) Apply(ctx context.Context, userID, analysisID, templateID string, strict bool) (generatedresumes.GeneratedResume, error) {
 	if userID == "" || analysisID == "" {
 		return generatedresumes.GeneratedResume{}, ErrInvalidInput
 	}
@@ -111,6 +113,11 @@ func (s *Service) Apply(ctx context.Context, userID, analysisID, templateID stri
 	if err := json.Unmarshal([]byte(jsonPayload), &resumeModel); err != nil {
 		log.Printf("apply pipeline decode failed analysis_id=%s: %v", analysis.ID, err)
 		return generatedresumes.GeneratedResume{}, ErrInvalidLLMOutput
+	}
+
+	applySkillsFromAnalysis(&resumeModel, analysis.Result)
+	if err := contract.Enforce(&resumeModel, strict); err != nil {
+		return generatedresumes.GeneratedResume{}, err
 	}
 
 	if err := validateResumeModel(resumeModel); err != nil {
@@ -207,4 +214,62 @@ func validateResumeModel(resumeModel model.ResumeModel) error {
 		}
 	}
 	return nil
+}
+
+func applySkillsFromAnalysis(resumeModel *model.ResumeModel, analysisResult map[string]any) {
+	industryCommon := extractIndustryCommonKeywords(analysisResult)
+	skillLines := skills.BuildSkillLines(
+		resumeModel.Skills,
+		industryCommon,
+		skills.DefaultMaxSkills,
+		skills.DefaultMissingKeywords,
+		skills.DefaultSkillDisplayLines,
+	)
+	if len(skillLines) == 0 {
+		return
+	}
+	resumeModel.Skills = model.ResumeSkills{Tools: skillLines}
+}
+
+func extractIndustryCommonKeywords(analysisResult map[string]any) []string {
+	if analysisResult == nil {
+		return nil
+	}
+	ats := asStringMap(analysisResult["ats"])
+	if ats == nil {
+		return nil
+	}
+	missing := asStringMap(ats["missingKeywords"])
+	if missing == nil {
+		return nil
+	}
+	return asStringSlice(missing["industryCommon"])
+}
+
+func asStringMap(value any) map[string]any {
+	switch v := value.(type) {
+	case map[string]any:
+		return v
+	default:
+		return nil
+	}
+}
+
+func asStringSlice(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				out = append(out, str)
+			}
+		}
+		return out
+	case string:
+		return []string{v}
+	default:
+		return nil
+	}
 }

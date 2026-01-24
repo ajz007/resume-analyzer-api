@@ -3,6 +3,7 @@ package applies_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -123,6 +124,52 @@ func TestGeneratedResumeDownloadUserOwn(t *testing.T) {
 	}
 }
 
+func TestGeneratedResumeDownloadReadFailureReturnsJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := readFailStore{}
+	genRepo := generatedresumes.NewMemoryRepo()
+	handler := applies.NewHandler(&applies.Service{}, genRepo, store)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("userId", "user-1")
+		c.Set("isGuest", false)
+		c.Next()
+	})
+	api := router.Group("/api/v1")
+	handler.RegisterRoutes(api)
+
+	resume := generatedresumes.GeneratedResume{
+		ID:         "resume-read-fail",
+		UserID:     "user-1",
+		DocumentID: "doc-1",
+		AnalysisID: "analysis-1",
+		TemplateID: "template-1",
+		StorageKey: "missing",
+		MimeType:   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		SizeBytes:  10,
+		CreatedAt:  time.Now().UTC(),
+	}
+	if err := genRepo.Create(context.Background(), resume); err != nil {
+		t.Fatalf("create generated resume: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/generated-resumes/"+resume.ID+"/download", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", resp.Code)
+	}
+	if ct := resp.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected json content type, got %s", ct)
+	}
+	if cd := resp.Header().Get("Content-Disposition"); cd != "" {
+		t.Fatalf("expected empty content disposition, got %s", cd)
+	}
+}
+
 func newDownloadRouter(t *testing.T, userID string, isGuest bool) (*gin.Engine, *generatedresumes.MemoryRepo, object.ObjectStore) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -143,6 +190,26 @@ func newDownloadRouter(t *testing.T, userID string, isGuest bool) (*gin.Engine, 
 	handler.RegisterRoutes(api)
 
 	return router, genRepo, store
+}
+
+type readFailStore struct{}
+
+func (readFailStore) Save(ctx context.Context, userID string, fileName string, r io.Reader) (string, int64, string, error) {
+	return "", 0, "", nil
+}
+
+func (readFailStore) Open(ctx context.Context, storageKey string) (io.ReadCloser, error) {
+	return readFailCloser{}, nil
+}
+
+type readFailCloser struct{}
+
+func (readFailCloser) Read([]byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (readFailCloser) Close() error {
+	return nil
 }
 
 func seedGeneratedResume(t *testing.T, repo *generatedresumes.MemoryRepo, store object.ObjectStore, userID, resumeID string) generatedresumes.GeneratedResume {

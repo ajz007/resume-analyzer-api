@@ -97,7 +97,11 @@ func ValidateV2_3WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		return nil, err
 	}
 	var parsed AnalysisResultV2_3
-	if err := parseAndValidateV2_3(raw, &parsed); err != nil {
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, err
+	}
+	SanitizeV2_3(&parsed)
+	if err := parsed.Validate(); err != nil {
 		return nil, err
 	}
 	if err := ValidateContentV2_3(&parsed); err != nil {
@@ -107,7 +111,11 @@ func ValidateV2_3WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		if retryErr != nil {
 			return nil, retryErr
 		}
-		if err := parseAndValidateV2_3(rawRetry, &parsed); err != nil {
+		if err := json.Unmarshal(rawRetry, &parsed); err != nil {
+			return nil, err
+		}
+		SanitizeV2_3(&parsed)
+		if err := parsed.Validate(); err != nil {
 			return nil, err
 		}
 		if err := ValidateContentV2_3(&parsed); err != nil {
@@ -141,4 +149,47 @@ func containsForbiddenTerm(text string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// SanitizeV2_3 trims and normalizes display-only fields before content validation.
+func SanitizeV2_3(r *AnalysisResultV2_3) {
+	if r == nil {
+		return
+	}
+	for i := range r.Issues {
+		r.Issues[i].Evidence = sanitizeEvidence(r.Issues[i].Evidence, 160)
+	}
+	for i := range r.BulletRewrites {
+		r.BulletRewrites[i].Evidence = sanitizeEvidence(r.BulletRewrites[i].Evidence, 160)
+	}
+}
+
+func sanitizeEvidence(value string, maxRunes int) string {
+	normalized := normalizeWhitespace(value)
+	if strings.EqualFold(normalized, "notFound") {
+		return "notFound"
+	}
+	return truncateWithEllipsis(normalized, maxRunes)
+}
+
+func normalizeWhitespace(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(trimmed), " ")
+}
+
+func truncateWithEllipsis(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	if maxRunes == 1 {
+		return "…"
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }

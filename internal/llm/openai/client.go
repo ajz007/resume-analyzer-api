@@ -3,6 +3,8 @@ package openai
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,15 +19,15 @@ import (
 	"resume-backend/internal/llm"
 )
 
-const (
-	apiURL = "https://api.openai.com/v1/chat/completions"
-)
+var apiURL = "https://api.openai.com/v1/chat/completions"
 
 // Client implements llm.Client using OpenAI Chat Completions.
 type Client struct {
-	apiKey     string
-	model      string
-	httpClient *http.Client
+	apiKey        string
+	model         string
+	temperature   float32
+	noTemp0Models map[string]struct{}
+	httpClient    *http.Client
 }
 
 // NewClient constructs a new OpenAI client.
@@ -42,9 +44,18 @@ func NewClient(apiKey, model string) (*Client, error) {
 			timeout = time.Duration(parsed) * time.Second
 		}
 	}
+	temperature := float32(0)
+	if raw := strings.TrimSpace(os.Getenv("OPENAI_TEMPERATURE")); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 32); err == nil {
+			temperature = float32(parsed)
+		}
+	}
+	noTemp0Models := parseNoTemp0Models(os.Getenv("LLM_NO_TEMP0_MODELS"))
 	return &Client{
-		apiKey: apiKey,
-		model:  model,
+		apiKey:        apiKey,
+		model:         model,
+		temperature:   temperature,
+		noTemp0Models: noTemp0Models,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -134,7 +145,14 @@ func (c *Client) analyzeFixJSON(ctx context.Context, input llm.AnalyzeInput, raw
 }
 
 func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messages []Message) (json.RawMessage, *chatResponseUsage, error) {
-	temp := float32(0)
+	if sink, ok := llm.PromptHashSinkFromContext(ctx); ok && sink != nil {
+		prompt := promptStringFromMessages(messages)
+		*sink = hashPromptString(prompt)
+	}
+	return c.analyzeOnceWithTemp(ctx, input, messages, c.temperature, true)
+}
+
+func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput, messages []Message, temp float32, allowRetry bool) (json.RawMessage, *chatResponseUsage, error) {
 	reqMessages := make([]chatMessage, 0, len(messages))
 	for _, m := range messages {
 		reqMessages = append(reqMessages, chatMessage{Role: m.Role, Content: m.Content})
@@ -146,9 +164,15 @@ func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messag
 			Type: "json_object",
 		},
 	}
-	if !isGPT5(c.model) {
+	tempSent := false
+	if temp != 0 {
 		reqBody.Temperature = &temp
+		tempSent = true
+	} else if supportsTemperatureZero(c.model, c.noTemp0Models) {
+		reqBody.Temperature = &temp
+		tempSent = true
 	}
+	logTemperatureDecision(c.model, tempSent, temp, false)
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, nil, err
@@ -180,6 +204,10 @@ func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messag
 		return nil, nil, fmt.Errorf("openai response parse: %w", err)
 	}
 	if parsed.Error != nil {
+		if allowRetry && tempSent && isTempUnsupportedError(parsed.Error.Message) {
+			logTemperatureDecision(c.model, false, temp, true)
+			return c.analyzeOnceWithTemp(ctx, input, messages, 0, false)
+		}
 		return nil, nil, fmt.Errorf("openai error: %s (%s)", parsed.Error.Message, parsed.Error.Type)
 	}
 	if len(parsed.Choices) == 0 {
@@ -225,6 +253,56 @@ func logUsage(model, promptVersion string, usage *chatResponseUsage) {
 
 func isGPT5(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-5")
+}
+
+func parseNoTemp0Models(raw string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		out[strings.ToLower(trimmed)] = struct{}{}
+	}
+	return out
+}
+
+func supportsTemperatureZero(model string, denylist map[string]struct{}) bool {
+	if len(denylist) == 0 {
+		return true
+	}
+	_, denied := denylist[strings.ToLower(strings.TrimSpace(model))]
+	return !denied
+}
+
+func isTempUnsupportedError(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "temperature") && strings.Contains(lower, "does not support 0")
+}
+
+func logTemperatureDecision(model string, tempSent bool, tempValue float32, fallbackRetry bool) {
+	log.Printf("llm temperature model=%s temp_sent=%t temp_value=%v fallback_retry=%t", model, tempSent, tempValue, fallbackRetry)
+}
+
+func promptStringFromMessages(messages []Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, m := range messages {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(m.Role)
+		b.WriteString(": ")
+		b.WriteString(m.Content)
+	}
+	return b.String()
+}
+
+func hashPromptString(prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(sum[:])
 }
 
 var _ llm.Client = (*Client)(nil)

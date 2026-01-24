@@ -16,32 +16,82 @@ type PGRepo struct {
 // Create inserts a new analysis.
 func (r *PGRepo) Create(ctx context.Context, analysis Analysis) error {
 	const query = `
-INSERT INTO analyses (id, document_id, user_id, status, result, job_description, prompt_version, provider, model, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-	_, err := r.DB.ExecContext(ctx, query, analysis.ID, analysis.DocumentID, analysis.UserID, analysis.Status, nil, analysis.JobDescription, analysis.PromptVersion, analysis.Provider, analysis.Model, analysis.CreatedAt)
+INSERT INTO analyses (
+	id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
+	job_description, prompt_version, analysis_version, prompt_hash, provider, model, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+	rawPayload, err := marshalJSONB(analysis.AnalysisRaw)
+	if err != nil {
+		return err
+	}
+	resultPayload, err := marshalJSONB(analysis.Result)
+	if err != nil {
+		return err
+	}
+	_, err = r.DB.ExecContext(ctx, query,
+		analysis.ID,
+		analysis.DocumentID,
+		analysis.UserID,
+		analysis.Status,
+		nil,
+		rawPayload,
+		resultPayload,
+		nil,
+		analysis.JobDescription,
+		analysis.PromptVersion,
+		analysis.AnalysisVersion,
+		analysis.PromptHash,
+		analysis.Provider,
+		analysis.Model,
+		analysis.CreatedAt,
+	)
 	return err
 }
 
 // GetByID returns an analysis by ID.
 func (r *PGRepo) GetByID(ctx context.Context, analysisID string) (Analysis, error) {
 	const query = `
-SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model,
+SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
+       job_description, prompt_version, analysis_version, prompt_hash, provider, model,
        error_message, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1`
 	var a Analysis
 	var result sql.NullString
+	var analysisRaw sql.NullString
+	var analysisResult sql.NullString
+	var analysisCompletedAt sql.NullTime
 	var jobDescription sql.NullString
 	var promptVersion sql.NullString
+	var analysisVersion sql.NullString
+	var promptHash sql.NullString
 	var provider sql.NullString
 	var model sql.NullString
 	var errorMessage sql.NullString
 	var startedAt sql.NullTime
 	var completedAt sql.NullTime
 	err := r.DB.QueryRowContext(ctx, query, analysisID).Scan(
-		&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model,
-		&errorMessage, &startedAt, &completedAt, &a.CreatedAt, &a.UpdatedAt,
+		&a.ID,
+		&a.DocumentID,
+		&a.UserID,
+		&a.Status,
+		&result,
+		&analysisRaw,
+		&analysisResult,
+		&analysisCompletedAt,
+		&jobDescription,
+		&promptVersion,
+		&analysisVersion,
+		&promptHash,
+		&provider,
+		&model,
+		&errorMessage,
+		&startedAt,
+		&completedAt,
+		&a.CreatedAt,
+		&a.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -49,10 +99,21 @@ LIMIT 1`
 		}
 		return Analysis{}, err
 	}
-	if result.Valid {
+	if analysisRaw.Valid {
+		if err := json.Unmarshal([]byte(analysisRaw.String), &a.AnalysisRaw); err != nil {
+			// keep empty
+		}
+	}
+	if analysisResult.Valid {
 		a.Result = map[string]any{}
-		if err := json.Unmarshal([]byte(result.String), &a.Result); err == nil {
-			// keep result parsed
+		if err := json.Unmarshal([]byte(analysisResult.String), &a.Result); err != nil {
+			// keep empty
+			a.Result = nil
+		}
+	} else if result.Valid {
+		a.Result = map[string]any{}
+		if err := json.Unmarshal([]byte(result.String), &a.Result); err != nil {
+			a.Result = nil
 		}
 	}
 	if jobDescription.Valid {
@@ -60,6 +121,15 @@ LIMIT 1`
 	}
 	if promptVersion.Valid {
 		a.PromptVersion = promptVersion.String
+	}
+	if analysisVersion.Valid {
+		a.AnalysisVersion = analysisVersion.String
+	}
+	if promptHash.Valid {
+		a.PromptHash = promptHash.String
+	}
+	if analysisCompletedAt.Valid {
+		a.AnalysisCompletedAt = &analysisCompletedAt.Time
 	}
 	if provider.Valid {
 		a.Provider = provider.String
@@ -90,6 +160,7 @@ func (r *PGRepo) UpdateStatusResultAndError(ctx context.Context, analysisID, sta
 UPDATE analyses
 SET status = $1,
     result = COALESCE($2::jsonb, result),
+    analysis_result = COALESCE($2::jsonb, analysis_result),
     error_message = COALESCE($3::text, error_message),
     started_at = CASE
         WHEN $4::timestamptz IS NOT NULL THEN $4::timestamptz
@@ -123,6 +194,72 @@ WHERE id = $6::uuid`
 	return nil
 }
 
+// UpdateAnalysisRaw updates analysis_raw.
+func (r *PGRepo) UpdateAnalysisRaw(ctx context.Context, analysisID string, raw any) error {
+	const query = `
+UPDATE analyses
+SET analysis_raw = $1::jsonb,
+    updated_at = now()
+WHERE id = $2::uuid`
+
+	payload, err := marshalJSONB(raw)
+	if err != nil {
+		return err
+	}
+	res, err := r.DB.ExecContext(ctx, query, payload, analysisID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateAnalysisResult updates analysis_result and analysis_completed_at.
+func (r *PGRepo) UpdateAnalysisResult(ctx context.Context, analysisID string, result map[string]any, completedAt *time.Time) error {
+	const query = `
+UPDATE analyses
+SET analysis_result = $1::jsonb,
+    analysis_completed_at = $2::timestamptz,
+    status = 'completed',
+    completed_at = COALESCE($2::timestamptz, completed_at),
+    updated_at = now()
+WHERE id = $3::uuid`
+
+	payload, err := marshalJSONB(result)
+	if err != nil {
+		return err
+	}
+	res, err := r.DB.ExecContext(ctx, query, payload, completedAt, analysisID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdatePromptMetadata updates analysis_version and prompt_hash.
+func (r *PGRepo) UpdatePromptMetadata(ctx context.Context, analysisID, analysisVersion, promptHash string) error {
+	const query = `
+UPDATE analyses
+SET analysis_version = COALESCE(NULLIF($1::text, ''), analysis_version),
+    prompt_hash = COALESCE(NULLIF($2::text, ''), prompt_hash),
+    updated_at = now()
+WHERE id = $3::uuid`
+
+	res, err := r.DB.ExecContext(ctx, query, analysisVersion, promptHash, analysisID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListByUser lists analyses for a user ordered newest-first.
 func (r *PGRepo) ListByUser(ctx context.Context, userID string, limit, offset int) ([]Analysis, error) {
 	if limit <= 0 {
@@ -136,7 +273,8 @@ func (r *PGRepo) ListByUser(ctx context.Context, userID string, limit, offset in
 	}
 
 	const query = `
-SELECT id, document_id, user_id, status, result, job_description, prompt_version, provider, model,
+SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
+       job_description, prompt_version, analysis_version, prompt_hash, provider, model,
        error_message, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE user_id = $1 AND deleted_at IS NULL
@@ -153,23 +291,55 @@ LIMIT $2 OFFSET $3`
 	for rows.Next() {
 		var a Analysis
 		var result sql.NullString
+		var analysisRaw sql.NullString
+		var analysisResult sql.NullString
+		var analysisCompletedAt sql.NullTime
 		var jobDescription sql.NullString
 		var promptVersion sql.NullString
+		var analysisVersion sql.NullString
+		var promptHash sql.NullString
 		var provider sql.NullString
 		var model sql.NullString
 		var errorMessage sql.NullString
 		var startedAt sql.NullTime
 		var completedAt sql.NullTime
 		if err := rows.Scan(
-			&a.ID, &a.DocumentID, &a.UserID, &a.Status, &result, &jobDescription, &promptVersion, &provider, &model,
-			&errorMessage, &startedAt, &completedAt, &a.CreatedAt, &a.UpdatedAt,
+			&a.ID,
+			&a.DocumentID,
+			&a.UserID,
+			&a.Status,
+			&result,
+			&analysisRaw,
+			&analysisResult,
+			&analysisCompletedAt,
+			&jobDescription,
+			&promptVersion,
+			&analysisVersion,
+			&promptHash,
+			&provider,
+			&model,
+			&errorMessage,
+			&startedAt,
+			&completedAt,
+			&a.CreatedAt,
+			&a.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
-		if result.Valid {
+		if analysisRaw.Valid {
+			if err := json.Unmarshal([]byte(analysisRaw.String), &a.AnalysisRaw); err != nil {
+				// ignore parse errors, keep nil
+			}
+		}
+		if analysisResult.Valid {
+			a.Result = map[string]any{}
+			if err := json.Unmarshal([]byte(analysisResult.String), &a.Result); err != nil {
+				a.Result = nil
+			}
+		} else if result.Valid {
 			a.Result = map[string]any{}
 			if err := json.Unmarshal([]byte(result.String), &a.Result); err != nil {
-				// ignore parse errors, keep nil
+				a.Result = nil
 			}
 		}
 		if jobDescription.Valid {
@@ -177,6 +347,15 @@ LIMIT $2 OFFSET $3`
 		}
 		if promptVersion.Valid {
 			a.PromptVersion = promptVersion.String
+		}
+		if analysisVersion.Valid {
+			a.AnalysisVersion = analysisVersion.String
+		}
+		if promptHash.Valid {
+			a.PromptHash = promptHash.String
+		}
+		if analysisCompletedAt.Valid {
+			a.AnalysisCompletedAt = &analysisCompletedAt.Time
 		}
 		if provider.Valid {
 			a.Provider = provider.String
@@ -199,3 +378,10 @@ LIMIT $2 OFFSET $3`
 }
 
 var _ Repo = (*PGRepo)(nil)
+
+func marshalJSONB(value any) ([]byte, error) {
+	if value == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(value)
+}

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>{{#EXPERIENCE}}</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>{{EXP_</w:t></w:r>
+      <w:r><w:t>ROLE}}</w:t></w:r>
+      <w:r><w:t> - </w:t></w:r>
+      <w:r><w:t>{{EXP_</w:t></w:r>
+      <w:r><w:t>COMPANY}}</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>{{EXP_LO</w:t></w:r>
+      <w:r><w:t>CATION}}</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>{{EXP_ST</w:t></w:r>
+      <w:r><w:t>ART}}</w:t></w:r>
+      <w:r><w:t> - </w:t></w:r>
+      <w:r><w:t>{{EXP_E</w:t></w:r>
+      <w:r><w:t>ND}}</w:t></w:r>
+      <w:r><w:t>{{#HIGHLIGHTS}}</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>{{HIGHLIGHT_ITEM}}</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>{{/HIGHLIGHTS}}</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>{{/EXPERIENCE}}</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>

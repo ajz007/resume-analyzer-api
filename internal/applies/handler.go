@@ -13,6 +13,7 @@ import (
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
 	"resume-backend/internal/shared/storage/object"
+	"resume-backend/resume/contract"
 )
 
 // Handler wires HTTP handlers to the apply service.
@@ -41,6 +42,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 type applyRequest struct {
 	TemplateID string `json:"templateId"`
+	Strict     bool   `json:"strict"`
 }
 
 func (h *Handler) apply(c *gin.Context) {
@@ -57,8 +59,13 @@ func (h *Handler) apply(c *gin.Context) {
 		return
 	}
 
-	resume, err := h.Svc.Apply(c.Request.Context(), userID, analysisID, req.TemplateID)
+	resume, err := h.Svc.Apply(c.Request.Context(), userID, analysisID, req.TemplateID, req.Strict)
 	if err != nil {
+		var missing contract.MissingFieldsError
+		if errors.As(err, &missing) {
+			respond.Error(c, http.StatusBadRequest, "missing_required_fields", "missing required fields", missing.Fields)
+			return
+		}
 		switch {
 		case errors.Is(err, ErrInvalidInput):
 			respond.Error(c, http.StatusBadRequest, "validation_error", "invalid input", nil)
@@ -193,10 +200,14 @@ func (h *Handler) download(c *gin.Context) {
 	}
 	defer reader.Close()
 
-	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to read generated resume", nil)
+		return
+	}
+
 	c.Header("Content-Disposition", "attachment; filename=\"generated_resume.docx\"")
-	c.Status(http.StatusOK)
-	_, _ = io.Copy(c.Writer, reader)
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data)
 }
 
 func decodeOptionalJSON(body io.ReadCloser, out any) error {

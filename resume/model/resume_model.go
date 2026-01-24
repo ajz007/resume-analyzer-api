@@ -147,6 +147,9 @@ func isFullURL(value string) bool {
 	if value == "" {
 		return false
 	}
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(value)), "TO-FILL:") {
+		return true
+	}
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return false
@@ -159,6 +162,9 @@ func isFullURL(value string) bool {
 
 func validateDateField(value, field string) error {
 	if value == "" || value == "Present" {
+		return nil
+	}
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(value)), "TO-FILL:") {
 		return nil
 	}
 	if !resumeDatePattern.MatchString(value) {

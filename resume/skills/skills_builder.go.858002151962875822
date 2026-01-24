@@ -1,0 +1,142 @@
+package skills
+
+import (
+	"strings"
+	"unicode"
+
+	"resume-backend/resume/model"
+)
+
+const (
+	DefaultMaxSkills           = 12
+	DefaultMissingKeywords     = 8
+	DefaultSkillDisplayLines   = 2
+)
+
+func BuildSkillLines(resumeSkills model.ResumeSkills, missing []string, maxSkills, missingLimit, lines int) []string {
+	list := BuildSkillList(resumeSkills, missing, maxSkills, missingLimit)
+	return splitSkillsIntoLines(list, lines)
+}
+
+func BuildSkillList(resumeSkills model.ResumeSkills, missing []string, maxSkills, missingLimit int) []string {
+	if maxSkills <= 0 {
+		return nil
+	}
+	if missingLimit < 0 {
+		missingLimit = 0
+	}
+
+	out := make([]string, 0, maxSkills)
+	seen := make(map[string]struct{})
+
+	add := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, formatSkillDisplay(trimmed))
+	}
+
+	for _, skill := range flattenResumeSkills(resumeSkills) {
+		add(skill)
+		if len(out) >= maxSkills {
+			return out
+		}
+	}
+
+	usedMissing := 0
+	for _, skill := range missing {
+		trimmed := strings.TrimSpace(skill)
+		if trimmed == "" {
+			continue
+		}
+		if usedMissing >= missingLimit {
+			break
+		}
+		usedMissing++
+		add(trimmed)
+		if len(out) >= maxSkills {
+			return out
+		}
+	}
+
+	return out
+}
+
+func splitSkillsIntoLines(skills []string, lines int) []string {
+	if len(skills) == 0 {
+		return nil
+	}
+	if lines <= 1 {
+		return []string{strings.Join(skills, ", ")}
+	}
+	if lines > len(skills) {
+		lines = len(skills)
+	}
+
+	lineSize := (len(skills) + lines - 1) / lines
+	out := make([]string, 0, lines)
+	for start := 0; start < len(skills); start += lineSize {
+		end := start + lineSize
+		if end > len(skills) {
+			end = len(skills)
+		}
+		out = append(out, strings.Join(skills[start:end], ", "))
+	}
+	return out
+}
+
+func flattenResumeSkills(skills model.ResumeSkills) []string {
+	out := make([]string, 0, len(skills.Languages)+len(skills.Frameworks)+len(skills.Databases)+len(skills.CloudDevOps)+len(skills.Observability)+len(skills.Tools))
+	out = append(out, skills.Languages...)
+	out = append(out, skills.Frameworks...)
+	out = append(out, skills.Databases...)
+	out = append(out, skills.CloudDevOps...)
+	out = append(out, skills.Observability...)
+	out = append(out, skills.Tools...)
+	return out
+}
+
+func formatSkillDisplay(value string) string {
+	normalized := strings.Join(strings.Fields(value), " ")
+	if normalized == "" {
+		return ""
+	}
+
+	parts := strings.Fields(normalized)
+	for i, part := range parts {
+		if isAllCaps(part) {
+			continue
+		}
+		parts[i] = titleToken(part)
+	}
+	return strings.Join(parts, " ")
+}
+
+func isAllCaps(value string) bool {
+	hasLetter := false
+	for _, r := range value {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		hasLetter = true
+		if unicode.IsLower(r) {
+			return false
+		}
+	}
+	return hasLetter
+}
+
+func titleToken(value string) string {
+	runes := []rune(strings.ToLower(value))
+	if len(runes) == 0 {
+		return ""
+	}
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
