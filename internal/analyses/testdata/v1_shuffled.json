@@ -1,0 +1,37 @@
+{
+  "summary": {
+    "overallAssessment": "Strong leadership and measurable delivery.",
+    "strengths": ["Clear impact", "Stakeholder alignment"],
+    "weaknesses": ["Limited recent tooling detail"]
+  },
+  "missingKeywords": ["typescript", "kubernetes", "observability"],
+  "formattingIssues": ["inconsistent bullets", "date formatting"],
+  "ats": {
+    "score": 82,
+    "missingKeywords": ["kubernetes", "observability"],
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "medium",
+      "section": "Experience",
+      "problem": "Some bullets lack measurable impact.",
+      "whyItMatters": "Recruiters prioritize quantified outcomes.",
+      "suggestion": "Add metrics where possible."
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Projects",
+      "before": "Built a reporting pipeline.",
+      "after": "Built a reporting pipeline that cut turnaround time by 30%.",
+      "rationale": "Highlights impact."
+    }
+  ],
+  "missingInformation": ["Portfolio", "Certifications"],
+  "actionPlan": {
+    "quickWins": ["Tighten summary", "Add metrics"],
+    "mediumEffort": ["Rewrite bullet 2", "Reorder skills"],
+    "deepFixes": ["Rewrite resume header", "Refactor experience section"]
+  }
+}
