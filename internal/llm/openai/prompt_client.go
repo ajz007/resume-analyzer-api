@@ -92,10 +92,16 @@ func (c *PromptClient) Complete(ctx context.Context, prompt string) (string, err
 
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
+		if resp.StatusCode >= 400 {
+			return "", fmt.Errorf("openai http status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
 		return "", fmt.Errorf("openai response parse: %w", err)
 	}
 	if parsed.Error != nil {
-		return "", fmt.Errorf("openai error: %s (%s)", parsed.Error.Message, parsed.Error.Type)
+		return "", fmt.Errorf("openai http status %d: %s (%s)", resp.StatusCode, parsed.Error.Message, parsed.Error.Type)
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("openai http status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if len(parsed.Choices) == 0 {
 		return "", fmt.Errorf("openai response missing choices")

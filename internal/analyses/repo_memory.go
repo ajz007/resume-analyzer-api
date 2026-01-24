@@ -22,6 +22,49 @@ func NewMemoryRepo() *MemoryRepo {
 	}
 }
 
+// GetOrCreateForDocument returns the latest analysis for a document or creates a new one.
+func (r *MemoryRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, allowRetry bool, allowCreate func() error) (Analysis, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Analysis{}, false, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var latest *Analysis
+	for _, existing := range r.byUser[analysis.UserID] {
+		if existing.DocumentID != analysis.DocumentID {
+			continue
+		}
+		if latest == nil || existing.CreatedAt.After(latest.CreatedAt) {
+			copy := existing
+			latest = &copy
+		}
+	}
+
+	if latest != nil {
+		switch latest.Status {
+		case StatusQueued, StatusProcessing:
+			return *latest, false, nil
+		case StatusCompleted:
+			return *latest, false, nil
+		case StatusFailed:
+			if !allowRetry {
+				return *latest, false, ErrRetryRequired
+			}
+		}
+	}
+
+	if allowCreate != nil {
+		if err := allowCreate(); err != nil {
+			return Analysis{}, false, err
+		}
+	}
+
+	r.byID[analysis.ID] = analysis
+	r.byUser[analysis.UserID] = append(r.byUser[analysis.UserID], analysis)
+	return analysis, true, nil
+}
+
 // Create stores the analysis.
 func (r *MemoryRepo) Create(ctx context.Context, analysis Analysis) error {
 	if err := ctx.Err(); err != nil {
@@ -50,11 +93,11 @@ func (r *MemoryRepo) GetByID(ctx context.Context, analysisID string) (Analysis, 
 
 // UpdateStatus updates the status and result for an existing analysis.
 func (r *MemoryRepo) UpdateStatus(ctx context.Context, analysisID, status string, result map[string]any) error {
-	return r.UpdateStatusResultAndError(ctx, analysisID, status, result, nil, nil, nil)
+	return r.UpdateStatusResultAndError(ctx, analysisID, status, result, nil, nil, nil, nil, nil)
 }
 
 // UpdateStatusResultAndError updates status/result/error fields and timestamps.
-func (r *MemoryRepo) UpdateStatusResultAndError(ctx context.Context, analysisID, status string, result map[string]any, errorMessage *string, startedAt *time.Time, completedAt *time.Time) error {
+func (r *MemoryRepo) UpdateStatusResultAndError(ctx context.Context, analysisID, status string, result map[string]any, errorCode *string, errorMessage *string, errorRetryable *bool, startedAt *time.Time, completedAt *time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -68,8 +111,14 @@ func (r *MemoryRepo) UpdateStatusResultAndError(ctx context.Context, analysisID,
 	if result != nil {
 		analysis.Result = result
 	}
+	if errorCode != nil {
+		analysis.ErrorCode = *errorCode
+	}
 	if errorMessage != nil {
 		analysis.ErrorMessage = errorMessage
+	}
+	if errorRetryable != nil {
+		analysis.ErrorRetryable = *errorRetryable
 	}
 	if startedAt != nil {
 		analysis.StartedAt = startedAt

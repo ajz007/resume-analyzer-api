@@ -40,6 +40,8 @@ func validateV2(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
+	parsed.ATS.Score = clampScore(parsed.ATS.Score)
+	parsed.ATS.ScoreBreakdown = clampScoreBreakdown(parsed.ATS.ScoreBreakdown)
 	if err := parsed.Validate(); err != nil {
 		return err
 	}

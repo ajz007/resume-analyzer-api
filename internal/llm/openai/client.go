@@ -149,10 +149,10 @@ func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messag
 		prompt := promptStringFromMessages(messages)
 		*sink = hashPromptString(prompt)
 	}
-	return c.analyzeOnceWithTemp(ctx, input, messages, c.temperature, true)
+	return c.analyzeOnceWithTemp(ctx, input, messages, c.temperature, true, false)
 }
 
-func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput, messages []Message, temp float32, allowRetry bool) (json.RawMessage, *chatResponseUsage, error) {
+func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput, messages []Message, temp float32, allowRetry bool, omitTemperature bool) (json.RawMessage, *chatResponseUsage, error) {
 	reqMessages := make([]chatMessage, 0, len(messages))
 	for _, m := range messages {
 		reqMessages = append(reqMessages, chatMessage{Role: m.Role, Content: m.Content})
@@ -165,10 +165,10 @@ func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput
 		},
 	}
 	tempSent := false
-	if temp != 0 {
+	if !omitTemperature && temp != 0 {
 		reqBody.Temperature = &temp
 		tempSent = true
-	} else if supportsTemperatureZero(c.model, c.noTemp0Models) {
+	} else if !omitTemperature && supportsTemperatureZero(c.model, c.noTemp0Models) {
 		reqBody.Temperature = &temp
 		tempSent = true
 	}
@@ -201,14 +201,20 @@ func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput
 
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
+		if resp.StatusCode >= 400 {
+			return nil, nil, fmt.Errorf("openai http status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
 		return nil, nil, fmt.Errorf("openai response parse: %w", err)
 	}
 	if parsed.Error != nil {
 		if allowRetry && tempSent && isTempUnsupportedError(parsed.Error.Message) {
 			logTemperatureDecision(c.model, false, temp, true)
-			return c.analyzeOnceWithTemp(ctx, input, messages, 0, false)
+			return c.analyzeOnceWithTemp(ctx, input, messages, 0, false, true)
 		}
-		return nil, nil, fmt.Errorf("openai error: %s (%s)", parsed.Error.Message, parsed.Error.Type)
+		return nil, nil, fmt.Errorf("openai http status %d: %s (%s)", resp.StatusCode, parsed.Error.Message, parsed.Error.Type)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, nil, fmt.Errorf("openai http status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if len(parsed.Choices) == 0 {
 		return nil, nil, fmt.Errorf("openai response missing choices")

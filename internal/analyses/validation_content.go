@@ -131,6 +131,8 @@ func parseAndValidateV2_2(raw []byte, out *AnalysisResultV2_2) error {
 	if err := json.Unmarshal(raw, out); err != nil {
 		return err
 	}
+	out.ATS.Score = clampScore(out.ATS.Score)
+	out.ATS.ScoreBreakdown = clampScoreBreakdown(out.ATS.ScoreBreakdown)
 	return out.Validate()
 }
 
@@ -138,6 +140,8 @@ func parseAndValidateV2_3(raw []byte, out *AnalysisResultV2_3) error {
 	if err := json.Unmarshal(raw, out); err != nil {
 		return err
 	}
+	out.ATS.Score = clampScore(out.ATS.Score)
+	out.ATS.ScoreBreakdown = clampScoreBreakdown(out.ATS.ScoreBreakdown)
 	return out.Validate()
 }
 

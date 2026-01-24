@@ -80,9 +80,60 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		}
 	}
 
-	go s.completeAsync(analysis.ID)
+	go s.completeAsync(backgroundWithRequestID(ctx), analysis.ID)
 
 	return analysis, nil
+}
+
+// StartOrReuse enqueues a new analysis or reuses an existing one for idempotent requests.
+func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescription, promptVersion string, allowRetry bool) (Analysis, bool, error) {
+	if documentID == "" || userID == "" {
+		return Analysis{}, false, errors.New("documentID and userID are required")
+	}
+	if promptVersion == "" {
+		promptVersion = "v2_1"
+	}
+
+	analysis := Analysis{
+		ID:              uuid.NewString(),
+		DocumentID:      documentID,
+		UserID:          userID,
+		JobDescription:  jobDescription,
+		PromptVersion:   promptVersion,
+		AnalysisVersion: normalizeAnalysisVersion(s.AnalysisVersion),
+		Provider:        normalizeProvider(s.Provider),
+		Model:           s.Model,
+		Status:          StatusQueued,
+		CreatedAt:       time.Now().UTC(),
+	}
+
+	var allowCreate func() error
+	if s.Usage != nil {
+		allowCreate = func() error {
+			ok, _, err := s.Usage.CanConsume(ctx, userID, 1)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return usage.ErrLimitReached
+			}
+			return nil
+		}
+	}
+
+	createdAnalysis, created, err := s.Repo.GetOrCreateForDocument(ctx, analysis, allowRetry, allowCreate)
+	if err != nil {
+		return createdAnalysis, false, err
+	}
+	if created && s.Usage != nil {
+		if _, err := s.Usage.Consume(ctx, userID, 1); err != nil {
+			return createdAnalysis, false, err
+		}
+	}
+	if created {
+		go s.completeAsync(backgroundWithRequestID(ctx), createdAnalysis.ID)
+	}
+	return createdAnalysis, created, nil
 }
 
 // Get returns an analysis by ID.
@@ -115,15 +166,14 @@ func normalizeAnalysisVersion(version string) string {
 	return strings.TrimSpace(version)
 }
 
-func (s *Service) completeAsync(analysisID string) {
-	ctx := context.Background()
+func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("panic: %v", r))
 		}
 	}()
 	startedAt := time.Now().UTC()
-	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusProcessing, nil, nil, &startedAt, nil); err != nil {
+	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusProcessing, nil, nil, nil, nil, &startedAt, nil); err != nil {
 		// THIS is the bug you’re currently hiding
 		s.failAnalysis(analysisID, fmt.Errorf("set processing failed: %w", err))
 		return
@@ -142,6 +192,8 @@ func (s *Service) completeAsync(analysisID string) {
 		s.failAnalysis(analysisID, errors.New("missing llm client"))
 		return
 	}
+	requestID := requestIDFromContext(ctx)
+	llmClient := newRetryingLLM(s.LLM, analysisID, requestID)
 
 	doc, err := s.DocRepo.GetByID(ctx, analysis.UserID, analysis.DocumentID)
 	if err != nil {
@@ -180,7 +232,7 @@ func (s *Service) completeAsync(analysisID string) {
 	var raw json.RawMessage
 	if analysis.PromptVersion == "v2" {
 		var err error
-		raw, err = ValidateV2WithRetry(ctxWithHash, s.LLM, input)
+		raw, err = ValidateV2WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2: %w", err))
 			return
@@ -191,7 +243,7 @@ func (s *Service) completeAsync(analysisID string) {
 		}
 	} else if analysis.PromptVersion == "v2_2" {
 		var err error
-		raw, err = ValidateV2_2WithRetry(ctxWithHash, s.LLM, input)
+		raw, err = ValidateV2_2WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_2: %w", err))
 			return
@@ -202,7 +254,7 @@ func (s *Service) completeAsync(analysisID string) {
 		}
 	} else if analysis.PromptVersion == "v2_3" {
 		var err error
-		raw, err = ValidateV2_3WithRetry(ctxWithHash, s.LLM, input)
+		raw, err = ValidateV2_3WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_3: %w", err))
 			return
@@ -213,7 +265,7 @@ func (s *Service) completeAsync(analysisID string) {
 		}
 	} else {
 		var err error
-		raw, err = s.LLM.AnalyzeResume(ctxWithHash, input)
+		raw, err = llmClient.AnalyzeResume(ctxWithHash, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm analyze: %w", err))
 			return
@@ -225,7 +277,7 @@ func (s *Service) completeAsync(analysisID string) {
 
 		var parsed AnalysisResultV1
 		if err := json.Unmarshal(raw, &parsed); err != nil {
-			rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(ctxWithHash, string(raw)), input)
+			rawRetry, retryErr := llmClient.AnalyzeResume(llm.WithFixJSON(ctxWithHash, string(raw)), input)
 			if retryErr != nil {
 				s.failAnalysis(analysisID, fmt.Errorf("llm analyze retry: %w", retryErr))
 				return
@@ -254,12 +306,11 @@ func (s *Service) completeAsync(analysisID string) {
 		return
 	}
 
-	var result map[string]any
-	if err := json.Unmarshal(raw, &result); err != nil {
-		s.failAnalysis(analysisID, fmt.Errorf("llm output parse: %w", err))
+	result, err := normalizeAnalysisResult(raw, analysis)
+	if err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("llm output invalid: %w", err))
 		return
 	}
-	normalizeResultOrdering(result)
 
 	completedAt := time.Now().UTC()
 	if err := s.Repo.UpdateAnalysisResult(ctx, analysisID, result, &completedAt); err != nil {
@@ -269,11 +320,41 @@ func (s *Service) completeAsync(analysisID string) {
 }
 
 func (s *Service) failAnalysis(analysisID string, err error) {
+	code, retryable := classifyFailure(err)
 	msg := sanitizeError(err)
 	completedAt := time.Now().UTC()
-	if updateErr := s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &msg, nil, &completedAt); updateErr != nil {
+	if updateErr := s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &code, &msg, &retryable, nil, &completedAt); updateErr != nil {
 		fmt.Printf("failAnalysis: update failed id=%s err=%v orig=%v\n", analysisID, updateErr, err)
 	}
+}
+
+func classifyFailure(err error) (string, bool) {
+	if err == nil {
+		return ErrorCodeInternal, false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ErrorCodeLLMTimeout, true
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "openai request timeout") {
+		return ErrorCodeLLMTimeout, true
+	}
+	if strings.Contains(msg, "timeout") && strings.Contains(msg, "llm") {
+		return ErrorCodeLLMTimeout, true
+	}
+	if strings.Contains(msg, "schema") || strings.Contains(msg, "llm output invalid") || strings.Contains(msg, "llm output parse") {
+		return ErrorCodeLLMSchemaMismatch, false
+	}
+	if strings.Contains(msg, "llm validate") || strings.Contains(msg, "llm output") {
+		return ErrorCodeLLMSchemaMismatch, false
+	}
+	if strings.Contains(msg, "validation") && !strings.Contains(msg, "llm") {
+		return ErrorCodeValidation, false
+	}
+	if strings.Contains(msg, "document") || strings.Contains(msg, "storage") || strings.Contains(msg, "analysis raw") || strings.Contains(msg, "analysis result") || strings.Contains(msg, "prompt metadata") || strings.Contains(msg, "set processing") {
+		return ErrorCodeStorage, true
+	}
+	return ErrorCodeInternal, false
 }
 
 func sanitizeError(err error) string {
@@ -324,8 +405,19 @@ func normalizeResultOrdering(result map[string]any) {
 	if result == nil {
 		return
 	}
-	normalizeStringArray(result, "missingKeywords")
-	normalizeStringArray(result, "formattingIssues")
+
+	if atsRaw, ok := result["ats"]; ok {
+		if ats, ok := atsRaw.(map[string]any); ok {
+			normalizeStringArray(ats, "formattingIssues")
+			if mkRaw, ok := ats["missingKeywords"]; ok {
+				if mk, ok := mkRaw.(map[string]any); ok {
+					normalizeStringArray(mk, "fromJobDescription")
+					normalizeStringArray(mk, "industryCommon")
+				}
+			}
+		}
+	}
+
 	normalizeStringArray(result, "missingInformation")
 
 	if planRaw, ok := result["actionPlan"]; ok {
