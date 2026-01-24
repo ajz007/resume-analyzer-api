@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,18 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	req := startAnalysisRequest{PromptVersion: "v2_1"}
 	if err := decodeOptionalJSON(c.Request.Body, &req); err != nil {
 		respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
+		return
+	}
+	if len(strings.TrimSpace(req.JobDescription)) == 0 {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription is required", []map[string]string{
+			{"field": "jobDescription", "issue": "required"},
+		})
+		return
+	}
+	if utf8.RuneCountInString(req.JobDescription) < 300 {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription too short", []map[string]string{
+			{"field": "jobDescription", "issue": "min_length"},
+		})
 		return
 	}
 	if utf8.RuneCountInString(req.JobDescription) > 50000 {
@@ -108,10 +121,23 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 		}
 		return
 	}
+	if analysis.UserID != middleware.UserIDFromContext(c) {
+		respond.Error(c, http.StatusNotFound, "not_found", "analysis not found", nil)
+		return
+	}
 
 	resp := gin.H{
 		"id":     analysis.ID,
 		"status": analysis.Status,
+	}
+	if analysis.StartedAt != nil {
+		resp["startedAt"] = analysis.StartedAt
+	}
+	if analysis.CompletedAt != nil {
+		resp["completedAt"] = analysis.CompletedAt
+	}
+	if analysis.Status == StatusFailed && analysis.ErrorMessage != nil {
+		resp["errorMessage"] = analysis.ErrorMessage
 	}
 	if analysis.Status == StatusCompleted && analysis.Result != nil {
 		resp["result"] = analysis.Result

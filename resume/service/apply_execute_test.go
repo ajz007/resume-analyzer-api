@@ -1,3 +1,6 @@
+//go:build phase2
+// +build phase2
+
 package service
 
 import (

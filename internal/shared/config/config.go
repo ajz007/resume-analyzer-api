@@ -18,6 +18,7 @@ type Config struct {
 	SSEKMSKeyID        string
 	LLMProvider        string
 	LLMModel           string
+	AnalysisVersion    string
 	DatabaseURL        string
 	Env                string
 	GoogleClientID     string
@@ -49,6 +50,7 @@ func Load() Config {
 		SSEKMSKeyID:        getEnv("SSE_KMS_KEY_ID", ""),
 		LLMProvider:        getEnv("LLM_PROVIDER", "openai"),
 		LLMModel:           getEnv("LLM_MODEL", ""),
+		AnalysisVersion:    getEnv("ANALYSIS_VERSION", "gpt-5-mini:v1"),
 		DatabaseURL:        dbURL,
 		Env:                env,
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),

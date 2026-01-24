@@ -16,6 +16,14 @@ Flags:
 - `--provider`: LLM provider (default from env/config).
 - `--model`: LLM model (default from env/config).
 
+## Testing
+
+Default tests (Phase 1) run with no tags:
+`go test ./...`
+Phase 2 tests cover DOCX/apply paths and are behind a tag:
+`go test -tags phase2 ./...`
+Run both locally when touching DOCX or apply flows.
+
 ## API
 
 ### Download generated resume

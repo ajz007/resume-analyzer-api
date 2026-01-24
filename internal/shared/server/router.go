@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"resume-backend/internal/analyses"
-	googleauth "resume-backend/internal/auth"
 	"resume-backend/internal/applies"
+	googleauth "resume-backend/internal/auth"
 	"resume-backend/internal/documents"
 	"resume-backend/internal/generatedresumes"
 	"resume-backend/internal/llm"
@@ -113,13 +113,14 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	}
 
 	analysisSvc := &analyses.Service{
-		Repo:     analysisRepo,
-		Usage:    usageSvc,
-		DocRepo:  docRepo,
-		Store:    store,
-		LLM:      llmClient,
-		Provider: cfg.LLMProvider,
-		Model:    cfg.LLMModel,
+		Repo:            analysisRepo,
+		Usage:           usageSvc,
+		DocRepo:         docRepo,
+		Store:           store,
+		LLM:             llmClient,
+		Provider:        cfg.LLMProvider,
+		Model:           cfg.LLMModel,
+		AnalysisVersion: cfg.AnalysisVersion,
 	}
 	analysisHandler := analyses.NewHandler(analysisSvc, docRepo)
 	generatedResumeSvc := &generatedresumes.Service{

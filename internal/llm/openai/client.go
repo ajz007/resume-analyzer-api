@@ -3,6 +3,8 @@ package openai
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,6 +137,10 @@ func (c *Client) analyzeFixJSON(ctx context.Context, input llm.AnalyzeInput, raw
 
 func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messages []Message) (json.RawMessage, *chatResponseUsage, error) {
 	temp := float32(0)
+	if sink, ok := llm.PromptHashSinkFromContext(ctx); ok && sink != nil {
+		prompt := promptStringFromMessages(messages)
+		*sink = hashPromptString(prompt)
+	}
 	reqMessages := make([]chatMessage, 0, len(messages))
 	for _, m := range messages {
 		reqMessages = append(reqMessages, chatMessage{Role: m.Role, Content: m.Content})
@@ -146,9 +152,7 @@ func (c *Client) analyzeOnce(ctx context.Context, input llm.AnalyzeInput, messag
 			Type: "json_object",
 		},
 	}
-	if !isGPT5(c.model) {
-		reqBody.Temperature = &temp
-	}
+	reqBody.Temperature = &temp
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, nil, err
@@ -225,6 +229,27 @@ func logUsage(model, promptVersion string, usage *chatResponseUsage) {
 
 func isGPT5(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-5")
+}
+
+func promptStringFromMessages(messages []Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, m := range messages {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(m.Role)
+		b.WriteString(": ")
+		b.WriteString(m.Content)
+	}
+	return b.String()
+}
+
+func hashPromptString(prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(sum[:])
 }
 
 var _ llm.Client = (*Client)(nil)

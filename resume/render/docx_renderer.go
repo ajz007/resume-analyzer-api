@@ -87,6 +87,10 @@ func renderDocumentXML(file *zip.File, resume model.ResumeModel) ([]byte, error)
 }
 
 func renderDocumentXMLText(xmlText string, resume model.ResumeModel) (string, error) {
+	rootStart, rootEnd, err := extractRootTags(xmlText)
+	if err != nil {
+		return "", err
+	}
 	root, header, err := parseXMLDocument(xmlText)
 	if err != nil {
 		return "", err
@@ -134,10 +138,23 @@ func renderDocumentXMLText(xmlText string, resume model.ResumeModel) (string, er
 		"{{/HIGHLIGHTS}}":    "",
 		"{{HIGHLIGHT_ITEM}}": "",
 	})
+	applyContactPlaceholders(root, resume)
+	removeEmptySections(root, resume)
+	normalizeParagraphNesting(root)
+	if err := validateNoPlaceholders(root); err != nil {
+		return "", err
+	}
 	enforceHeadingBold(root, []string{"Summary", "Skills", "Experience", "Education"})
 
-	xmlText, err = encodeXMLDocument(header, root)
+	xmlText, err = encodeXMLDocument(header, root, rootStart, rootEnd)
 	if err != nil {
+		return "", err
+	}
+
+	if err := validateDocumentXMLStrict(xmlText); err != nil {
+		return "", err
+	}
+	if err := validateDocumentXMLStructure(xmlText); err != nil {
 		return "", err
 	}
 
@@ -333,6 +350,8 @@ func formatLinkStructs(links any) string {
 }
 
 var tokenPattern = regexp.MustCompile(`{{[^}]+}}`)
+var placeholderPattern = regexp.MustCompile(`(?i)\[(email|phone|handle)\]`)
+var todoPattern = regexp.MustCompile(`(?i)\bTODO\b`)
 
 func findRemainingToken(xmlText string) string {
 	if match := tokenPattern.FindString(xmlText); match != "" {
@@ -353,4 +372,239 @@ func findRemainingToken(xmlText string) string {
 		return xmlText[start : idx+2]
 	}
 	return ""
+}
+
+func applyContactPlaceholders(root *xmlNode, resume model.ResumeModel) {
+	replaceOrRemovePlaceholder(root, placeholderRegex("email"), "[email]", resume.Header.Email)
+	replaceOrRemovePlaceholder(root, placeholderRegex("phone"), "[phone]", resume.Header.Phone)
+	replaceOrRemovePlaceholder(root, placeholderRegex("handle"), "[handle]", contactHandle(resume.Header.Links))
+}
+
+func replaceOrRemovePlaceholder(root *xmlNode, pattern *regexp.Regexp, placeholder, value string) {
+	if root == nil {
+		return
+	}
+	placeholderLower := strings.ToLower(placeholder)
+	if strings.TrimSpace(value) == "" {
+		removeParagraphs(root, func(p *xmlNode) bool {
+			text := strings.ToLower(paragraphText(p))
+			return strings.Contains(text, placeholderLower)
+		})
+		return
+	}
+	walkXML(root, func(n *xmlNode) bool {
+		if !isElement(n, "p") {
+			return true
+		}
+		text := paragraphText(n)
+		if !pattern.MatchString(text) || !strings.Contains(strings.ToLower(text), placeholderLower) {
+			return true
+		}
+		replacePatternInParagraph(n, pattern, value)
+		return true
+	})
+}
+
+func placeholderRegex(name string) *regexp.Regexp {
+	escaped := regexp.QuoteMeta(name)
+	return regexp.MustCompile(`(?i)\[` + escaped + `\]`)
+}
+
+func replacePatternInParagraph(p *xmlNode, pattern *regexp.Regexp, value string) {
+	textNodes := collectTextElements(p)
+	if len(textNodes) == 0 {
+		return
+	}
+	combined := ""
+	for _, node := range textNodes {
+		combined += nodeText(node)
+	}
+	updated := pattern.ReplaceAllString(combined, value)
+	if updated == combined {
+		return
+	}
+	setNodeText(textNodes[0], updated)
+	for i := 1; i < len(textNodes); i++ {
+		setNodeText(textNodes[i], "")
+	}
+}
+
+func contactHandle(links any) string {
+	switch v := links.(type) {
+	case []string:
+		if len(v) > 0 {
+			return v[0]
+		}
+	}
+	return ""
+}
+
+func removeEmptySections(root *xmlNode, resume model.ResumeModel) {
+	sections := []struct {
+		heading string
+		empty   bool
+	}{
+		{"Summary", len(resume.Summary) == 0},
+		{"Skills", len(flattenSkills(resume.Skills)) == 0},
+		{"Experience", len(resume.Experience) == 0},
+		{"Education", len(resume.Education) == 0},
+		{"Certifications", len(resume.Certifications) == 0},
+		{"Awards", len(resume.Achievements) == 0},
+		{"Projects", len(resume.Projects) == 0},
+	}
+	for _, section := range sections {
+		if !section.empty {
+			continue
+		}
+		removeParagraphs(root, func(p *xmlNode) bool {
+			return strings.EqualFold(strings.TrimSpace(paragraphText(p)), section.heading)
+		})
+	}
+}
+
+func validateNoPlaceholders(root *xmlNode) error {
+	if root == nil {
+		return nil
+	}
+	var failure error
+	walkXML(root, func(n *xmlNode) bool {
+		if !isElement(n, "p") {
+			return true
+		}
+		text := paragraphText(n)
+		switch {
+		case tokenPattern.MatchString(text):
+			failure = fmt.Errorf("document.xml contains unresolved template tokens")
+			return false
+		case placeholderPattern.MatchString(text):
+			failure = fmt.Errorf("document.xml contains placeholder contact values")
+			return false
+		case todoPattern.MatchString(text):
+			failure = fmt.Errorf("document.xml contains TODO placeholders")
+			return false
+		}
+		return true
+	})
+	return failure
+}
+
+func validateDocumentXMLStrict(xmlText string) error {
+	rootStart, _, err := extractRootTags(xmlText)
+	if err != nil {
+		return err
+	}
+	declared := namespacesFromRootStart(rootStart)
+	decoder := xml.NewDecoder(strings.NewReader(xmlText))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("document.xml parse failed: %w\n%s", err, firstLines(xmlText, 5))
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			if err := checkDeclaredNamespace(t.Name.Space, t.Name.Local, declared, "element", xmlText); err != nil {
+				return err
+			}
+			for _, attr := range t.Attr {
+				if err := checkDeclaredNamespace(attr.Name.Space, attr.Name.Local, declared, "attribute", xmlText); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateDocumentXMLStructure(xmlText string) error {
+	decoder := xml.NewDecoder(strings.NewReader(xmlText))
+	var stack []xml.Name
+	type runState struct {
+		seenText bool
+	}
+	var runs []runState
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("document.xml parse failed: %w\n%s", err, firstLines(xmlText, 5))
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			stack = append(stack, t.Name)
+			if isWmlElement(t.Name, "p") {
+				for i := len(stack) - 2; i >= 0; i-- {
+					if isWmlElement(stack[i], "p") {
+						return fmt.Errorf("document.xml has nested <w:p>\n%s", firstLines(xmlText, 5))
+					}
+				}
+			}
+			if isWmlElement(t.Name, "r") {
+				runs = append(runs, runState{})
+			}
+			if isWmlElement(t.Name, "t") && len(runs) > 0 {
+				runs[len(runs)-1].seenText = true
+			}
+			if isWmlElement(t.Name, "rPr") && len(runs) > 0 && runs[len(runs)-1].seenText {
+				return fmt.Errorf("document.xml has <w:rPr> after <w:t> in a run\n%s", firstLines(xmlText, 5))
+			}
+		case xml.EndElement:
+			if isWmlElement(t.Name, "r") && len(runs) > 0 {
+				runs = runs[:len(runs)-1]
+			}
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	return nil
+}
+
+func isWmlElement(name xml.Name, local string) bool {
+	return name.Local == local && name.Space == wmlNamespace
+}
+
+func checkDeclaredNamespace(space, local string, declared map[string]string, kind string, xmlText string) error {
+	if space == "" {
+		return nil
+	}
+	prefix, ok := knownNamespacePrefixes[space]
+	if !ok {
+		return nil
+	}
+	if uri, ok := declared[prefix]; ok && uri == space {
+		return nil
+	}
+	name := local
+	if prefix != "" {
+		name = prefix + ":" + local
+	}
+	return fmt.Errorf("document.xml missing root namespace for %s %s\n%s", kind, name, firstLines(xmlText, 5))
+}
+
+var knownNamespacePrefixes = map[string]string{
+	wmlNamespace: "w",
+	relNamespace: "r",
+	"http://schemas.openxmlformats.org/drawingml/2006/main":                 "a",
+	"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing": "wp",
+	"http://schemas.openxmlformats.org/drawingml/2006/picture":              "pic",
+	"http://schemas.openxmlformats.org/markup-compatibility/2006":           "mc",
+	"http://schemas.microsoft.com/office/word/2010/wordml":                  "w14",
+	"http://schemas.microsoft.com/office/word/2012/wordml":                  "w15",
+}
+
+func firstLines(text string, count int) string {
+	if count <= 0 {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > count {
+		lines = lines[:count]
+	}
+	return strings.Join(lines, "\n")
 }

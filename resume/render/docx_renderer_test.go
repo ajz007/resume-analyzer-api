@@ -1,3 +1,6 @@
+//go:build phase2
+// +build phase2
+
 package render
 
 import (
@@ -203,6 +206,55 @@ func TestRenderResumeHasNoTemplateTokens(t *testing.T) {
 	}
 }
 
+func TestRenderResumeOmitsEmptySectionsAndValidStructure(t *testing.T) {
+	resume := model.ResumeModel{
+		Header: model.ResumeHeader{
+			Name:  "Ada Lovelace",
+			Email: "ada@example.com",
+		},
+		Skills: model.ResumeSkills{
+			Languages: []string{"Go", "Python"},
+		},
+		Certifications: []model.ResumeCertification{},
+		Achievements:   []model.ResumeAchievement{},
+	}
+
+	docxBytes, err := renderResumeFromTemplate("../../assets/templates/resume_modern_ats_v1.docx", resume)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	documentXML, err := readDocumentXML(docxBytes)
+	if err != nil {
+		t.Fatalf("read document.xml failed: %v", err)
+	}
+
+	if err := validateDocumentXMLStructure(documentXML); err != nil {
+		t.Fatalf("structure validation failed: %v", err)
+	}
+
+	text, err := extractDocumentText(documentXML)
+	if err != nil {
+		t.Fatalf("extract text failed: %v", err)
+	}
+
+	assertContains(t, text, "Skills")
+	assertContains(t, text, "Go")
+	assertContains(t, text, "Python")
+	assertNotContains(t, text, "Certifications")
+	assertNotContains(t, text, "Awards")
+
+	if tokenPattern.MatchString(text) {
+		t.Fatalf("expected no template tokens in text")
+	}
+	if placeholderPattern.MatchString(text) {
+		t.Fatalf("expected no contact placeholders in text")
+	}
+	if todoPattern.MatchString(text) {
+		t.Fatalf("expected no TODO placeholders in text")
+	}
+}
+
 func TestRenderResumeProducesValidDocx(t *testing.T) {
 	resume := model.ResumeModel{
 		Header: model.ResumeHeader{
@@ -242,6 +294,10 @@ func TestRenderResumeProducesValidDocx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read document.xml failed: %v", err)
 	}
+
+	assertContains(t, documentXML, "<w:document")
+	assertContains(t, documentXML, "xmlns:w=\""+wmlNamespace+"\"")
+	assertContains(t, documentXML, "w:val=\"")
 
 	var doc struct {
 		XMLName xml.Name `xml:"document"`
@@ -447,4 +503,23 @@ func itoa(value int) string {
 		value /= 10
 	}
 	return string(buf[i:])
+}
+
+func extractDocumentText(xmlText string) (string, error) {
+	root, _, err := parseXMLDocument(xmlText)
+	if err != nil {
+		return "", err
+	}
+	var builder strings.Builder
+	walkXML(root, func(n *xmlNode) bool {
+		if !isElement(n, "p") {
+			return true
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(paragraphText(n))
+		return true
+	})
+	return builder.String(), nil
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,13 +28,14 @@ const (
 
 // Service contains business logic for analyses.
 type Service struct {
-	Repo     Repo
-	Usage    *usage.Service
-	DocRepo  documents.DocumentsRepo
-	Store    object.ObjectStore
-	LLM      llm.Client
-	Provider string
-	Model    string
+	Repo            Repo
+	Usage           *usage.Service
+	DocRepo         documents.DocumentsRepo
+	Store           object.ObjectStore
+	LLM             llm.Client
+	Provider        string
+	Model           string
+	AnalysisVersion string
 }
 
 // Create enqueues a new analysis and kicks off asynchronous completion.
@@ -56,15 +58,16 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 	}
 
 	analysis := Analysis{
-		ID:             uuid.NewString(),
-		DocumentID:     documentID,
-		UserID:         userID,
-		JobDescription: jobDescription,
-		PromptVersion:  promptVersion,
-		Provider:       normalizeProvider(s.Provider),
-		Model:          s.Model,
-		Status:         StatusQueued,
-		CreatedAt:      time.Now().UTC(),
+		ID:              uuid.NewString(),
+		DocumentID:      documentID,
+		UserID:          userID,
+		JobDescription:  jobDescription,
+		PromptVersion:   promptVersion,
+		AnalysisVersion: normalizeAnalysisVersion(s.AnalysisVersion),
+		Provider:        normalizeProvider(s.Provider),
+		Model:           s.Model,
+		Status:          StatusQueued,
+		CreatedAt:       time.Now().UTC(),
 	}
 
 	if err := s.Repo.Create(ctx, analysis); err != nil {
@@ -105,6 +108,13 @@ func normalizeProvider(provider string) string {
 	return provider
 }
 
+func normalizeAnalysisVersion(version string) string {
+	if strings.TrimSpace(version) == "" {
+		return "unknown"
+	}
+	return strings.TrimSpace(version)
+}
+
 func (s *Service) completeAsync(analysisID string) {
 	ctx := context.Background()
 	defer func() {
@@ -119,7 +129,7 @@ func (s *Service) completeAsync(analysisID string) {
 		return
 	}
 
-	analysis, err := s.Repo.GetByID(context.Background(), analysisID)
+	analysis, err := s.Repo.GetByID(ctx, analysisID)
 	if err != nil {
 		s.failAnalysis(analysisID, fmt.Errorf("analysis lookup: %w", err))
 		return
@@ -133,7 +143,7 @@ func (s *Service) completeAsync(analysisID string) {
 		return
 	}
 
-	doc, err := s.DocRepo.GetByID(context.Background(), analysis.UserID, analysis.DocumentID)
+	doc, err := s.DocRepo.GetByID(ctx, analysis.UserID, analysis.DocumentID)
 	if err != nil {
 		s.failAnalysis(analysisID, fmt.Errorf("document lookup id=%s: %w", analysis.DocumentID, err))
 		return
@@ -141,18 +151,18 @@ func (s *Service) completeAsync(analysisID string) {
 
 	extractedKey := doc.ExtractedTextKey
 	if extractedKey == "" {
-		if _, err := extract.ExtractText(context.Background(), s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
+		if _, err := extract.ExtractText(ctx, s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err))
 			return
 		}
 		extractedKey = doc.StorageKey + ".extracted.txt"
-		if err := s.DocRepo.UpdateExtraction(context.Background(), doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+		if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err))
 			return
 		}
 	}
 
-	extracted, err := loadText(context.Background(), s.Store, extractedKey)
+	extracted, err := loadText(ctx, s.Store, extractedKey)
 	if err != nil {
 		s.failAnalysis(analysisID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err))
 		return
@@ -164,50 +174,84 @@ func (s *Service) completeAsync(analysisID string) {
 		PromptVersion:  analysis.PromptVersion,
 		TargetRole:     "",
 	}
+	var promptHash string
+	ctxWithHash := llm.WithPromptHashCapture(ctx, &promptHash)
 
 	var raw json.RawMessage
 	if analysis.PromptVersion == "v2" {
 		var err error
-		raw, err = ValidateV2WithRetry(context.Background(), s.LLM, input)
+		raw, err = ValidateV2WithRetry(ctxWithHash, s.LLM, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2: %w", err))
 			return
 		}
+		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("set analysis raw failed: %w", err))
+			return
+		}
 	} else if analysis.PromptVersion == "v2_2" {
 		var err error
-		raw, err = ValidateV2_2WithRetry(context.Background(), s.LLM, input)
+		raw, err = ValidateV2_2WithRetry(ctxWithHash, s.LLM, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_2: %w", err))
 			return
 		}
+		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("set analysis raw failed: %w", err))
+			return
+		}
 	} else if analysis.PromptVersion == "v2_3" {
 		var err error
-		raw, err = ValidateV2_3WithRetry(context.Background(), s.LLM, input)
+		raw, err = ValidateV2_3WithRetry(ctxWithHash, s.LLM, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm validate v2_3: %w", err))
 			return
 		}
+		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("set analysis raw failed: %w", err))
+			return
+		}
 	} else {
 		var err error
-		raw, err = s.LLM.AnalyzeResume(context.Background(), input)
+		raw, err = s.LLM.AnalyzeResume(ctxWithHash, input)
 		if err != nil {
 			s.failAnalysis(analysisID, fmt.Errorf("llm analyze: %w", err))
+			return
+		}
+		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+			s.failAnalysis(analysisID, fmt.Errorf("set analysis raw failed: %w", err))
 			return
 		}
 
 		var parsed AnalysisResultV1
 		if err := json.Unmarshal(raw, &parsed); err != nil {
-			rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(context.Background(), string(raw)), input)
+			rawRetry, retryErr := s.LLM.AnalyzeResume(llm.WithFixJSON(ctxWithHash, string(raw)), input)
 			if retryErr != nil {
 				s.failAnalysis(analysisID, fmt.Errorf("llm analyze retry: %w", retryErr))
 				return
 			}
 			if err := json.Unmarshal(rawRetry, &parsed); err != nil {
+				if storeErr := s.storeAnalysisRaw(ctx, analysisID, rawRetry); storeErr != nil {
+					s.failAnalysis(analysisID, fmt.Errorf("set analysis raw failed: %w", storeErr))
+					return
+				}
 				s.failAnalysis(analysisID, fmt.Errorf("llm output invalid: %w", err))
 				return
 			}
 			raw = rawRetry
+			if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+				s.failAnalysis(analysisID, fmt.Errorf("set analysis raw failed: %w", err))
+				return
+			}
 		}
+	}
+	if promptHash == "" {
+		// TODO: Ensure prompt_hash is captured for non-OpenAI providers if/when added.
+		promptHash = ""
+	}
+	if err := s.Repo.UpdatePromptMetadata(ctx, analysisID, analysis.AnalysisVersion, promptHash); err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("set prompt metadata failed: %w", err))
+		return
 	}
 
 	var result map[string]any
@@ -215,10 +259,11 @@ func (s *Service) completeAsync(analysisID string) {
 		s.failAnalysis(analysisID, fmt.Errorf("llm output parse: %w", err))
 		return
 	}
+	normalizeResultOrdering(result)
 
 	completedAt := time.Now().UTC()
-	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusCompleted, result, nil, nil, &completedAt); err != nil {
-		s.failAnalysis(analysisID, fmt.Errorf("set completed failed: %w", err))
+	if err := s.Repo.UpdateAnalysisResult(ctx, analysisID, result, &completedAt); err != nil {
+		s.failAnalysis(analysisID, fmt.Errorf("set analysis result failed: %w", err))
 		return
 	}
 }
@@ -257,4 +302,61 @@ func loadText(ctx context.Context, store object.ObjectStore, key string) (string
 		return "", err
 	}
 	return string(data), nil
+}
+
+func buildRawPayload(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return map[string]any{"rawText": ""}
+	}
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err == nil {
+		return parsed
+	}
+	return map[string]any{"rawText": string(raw)}
+}
+
+func (s *Service) storeAnalysisRaw(ctx context.Context, analysisID string, raw json.RawMessage) error {
+	rawPayload := buildRawPayload(raw)
+	return s.Repo.UpdateAnalysisRaw(ctx, analysisID, rawPayload)
+}
+
+func normalizeResultOrdering(result map[string]any) {
+	if result == nil {
+		return
+	}
+	normalizeStringArray(result, "missingKeywords")
+	normalizeStringArray(result, "formattingIssues")
+	normalizeStringArray(result, "missingInformation")
+
+	if planRaw, ok := result["actionPlan"]; ok {
+		if plan, ok := planRaw.(map[string]any); ok {
+			normalizeStringArray(plan, "quickWins")
+			normalizeStringArray(plan, "mediumEffort")
+			normalizeStringArray(plan, "deepFixes")
+		}
+	}
+}
+
+func normalizeStringArray(container map[string]any, key string) {
+	raw, ok := container[key]
+	if !ok || raw == nil {
+		return
+	}
+	if list, ok := raw.([]string); ok {
+		sort.Strings(list)
+		container[key] = list
+		return
+	}
+	if list, ok := raw.([]any); ok {
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			str, ok := item.(string)
+			if !ok {
+				return
+			}
+			out = append(out, str)
+		}
+		sort.Strings(out)
+		container[key] = out
+	}
 }
