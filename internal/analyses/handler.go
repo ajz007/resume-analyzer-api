@@ -43,6 +43,7 @@ type startAnalysisRequest struct {
 
 func (h *Handler) startAnalysis(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c)
+	ctx := withRequestID(c.Request.Context(), middleware.RequestIDFromContext(c))
 	documentID := c.Param("id")
 	if documentID == "" {
 		respond.Error(c, http.StatusBadRequest, "validation_error", "document id is required", nil)
@@ -85,9 +86,19 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		return
 	}
 
-	analysis, err := h.Svc.Create(c.Request.Context(), doc.ID, userID, req.JobDescription, req.PromptVersion)
+	allowRetry := false
+	if strings.EqualFold(c.Query("retry"), "true") {
+		allowRetry = true
+	}
+	if strings.EqualFold(c.GetHeader("X-Retry-Analysis"), "true") {
+		allowRetry = true
+	}
+
+	analysis, created, err := h.Svc.StartOrReuse(ctx, doc.ID, userID, req.JobDescription, req.PromptVersion, allowRetry)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrRetryRequired):
+			respond.Error(c, http.StatusConflict, "retry_required", "analysis failed; set retry=true or X-Retry-Analysis: true to retry", nil)
 		case errors.Is(err, usage.ErrLimitReached):
 			respond.Error(c, http.StatusTooManyRequests, "limit_reached", "You've reached your analysis limit. Upgrade your plan to continue.", []map[string]string{
 				{"field": "usage", "issue": "limit_reached"},
@@ -95,6 +106,15 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		default:
 			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to start analysis", nil)
 		}
+		return
+	}
+
+	if !created && analysis.Status == StatusCompleted && analysis.Result != nil {
+		respond.JSON(c, http.StatusOK, gin.H{
+			"analysisId": analysis.ID,
+			"status":     analysis.Status,
+			"result":     analysis.Result,
+		})
 		return
 	}
 
@@ -136,8 +156,14 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 	if analysis.CompletedAt != nil {
 		resp["completedAt"] = analysis.CompletedAt
 	}
-	if analysis.Status == StatusFailed && analysis.ErrorMessage != nil {
-		resp["errorMessage"] = analysis.ErrorMessage
+	if analysis.Status == StatusFailed {
+		resp["errorCode"] = analysis.ErrorCode
+		resp["retryable"] = analysis.ErrorRetryable
+		if analysis.ErrorMessage != nil {
+			resp["errorMessage"] = *analysis.ErrorMessage
+		} else {
+			resp["errorMessage"] = ""
+		}
 	}
 	if analysis.Status == StatusCompleted && analysis.Result != nil {
 		resp["result"] = analysis.Result

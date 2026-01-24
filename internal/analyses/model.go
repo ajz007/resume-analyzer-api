@@ -13,7 +13,9 @@ type Analysis struct {
 	PromptHash          string         `json:"promptHash"`
 	Provider            string         `json:"provider"`
 	Model               string         `json:"model"`
+	ErrorCode           string         `json:"errorCode,omitempty"`
 	ErrorMessage        *string        `json:"errorMessage,omitempty"`
+	ErrorRetryable      bool           `json:"retryable,omitempty"`
 	StartedAt           *time.Time     `json:"startedAt,omitempty"`
 	CompletedAt         *time.Time     `json:"completedAt,omitempty"`
 	AnalysisCompletedAt *time.Time     `json:"analysisCompletedAt,omitempty"`

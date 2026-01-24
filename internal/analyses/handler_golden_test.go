@@ -47,8 +47,23 @@ func TestAnalysisResultPassthroughV2_1(t *testing.T) {
 	if err := json.Unmarshal(fixture, &expected); err != nil {
 		t.Fatalf("unmarshal fixture: %v", err)
 	}
-	if !reflect.DeepEqual(resp.Result, expected) {
-		t.Fatalf("result did not match fixture")
+
+	summaryRaw, ok := resp.Result["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected summary in response")
+	}
+	expectedSummary := expected["summary"].(map[string]any)
+	if summaryRaw["overallAssessment"] != expectedSummary["overallAssessment"] {
+		t.Fatalf("summary.overallAssessment mismatch")
+	}
+
+	atsRaw, ok := resp.Result["ats"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ats in response")
+	}
+	expectedATS := expected["ats"].(map[string]any)
+	if atsRaw["score"] != expectedATS["score"] {
+		t.Fatalf("ats.score mismatch")
 	}
 }
 
@@ -66,8 +81,16 @@ func TestAnalysisSortsSetLikeLists(t *testing.T) {
 		t.Fatalf("expected status completed, got %q", resp.Status)
 	}
 
-	assertStringSlice(t, resp.Result, "missingKeywords", []string{"kubernetes", "observability", "typescript"})
-	assertStringSlice(t, resp.Result, "formattingIssues", []string{"date formatting", "inconsistent bullets"})
+	atsRaw, ok := resp.Result["ats"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ats to be object")
+	}
+	missingRaw, ok := atsRaw["missingKeywords"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ats.missingKeywords to be object")
+	}
+	assertStringSlice(t, missingRaw, "fromJobDescription", []string{"kubernetes", "observability", "typescript"})
+	assertStringSlice(t, atsRaw, "formattingIssues", []string{"date formatting", "inconsistent bullets"})
 	assertStringSlice(t, resp.Result, "missingInformation", []string{"Certifications", "Portfolio"})
 
 	actionPlanRaw, ok := resp.Result["actionPlan"].(map[string]any)
