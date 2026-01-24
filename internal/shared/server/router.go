@@ -18,6 +18,7 @@ import (
 	"resume-backend/internal/llm"
 	openai "resume-backend/internal/llm/openai"
 	"resume-backend/internal/shared/config"
+	"resume-backend/internal/shared/metrics"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
 	"resume-backend/internal/shared/storage/db"
@@ -39,6 +40,8 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		middleware.CORS(cfg.CORSAllowOrigin),
 		middleware.Auth(cfg.Env),
 	)
+
+	r.GET("/metrics", metrics.Handler())
 
 	// Dependencies
 	var store object.ObjectStore

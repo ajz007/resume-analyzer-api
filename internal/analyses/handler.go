@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +15,7 @@ import (
 	"resume-backend/internal/documents"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
+	"resume-backend/internal/shared/telemetry"
 	"resume-backend/internal/usage"
 )
 
@@ -22,11 +23,16 @@ import (
 type Handler struct {
 	Svc     *Service
 	DocRepo documents.DocumentsRepo
+	limiter *pollLimiter
 }
 
 // NewHandler constructs a Handler.
 func NewHandler(svc *Service, docRepo documents.DocumentsRepo) *Handler {
-	return &Handler{Svc: svc, DocRepo: docRepo}
+	return &Handler{
+		Svc:     svc,
+		DocRepo: docRepo,
+		limiter: newPollLimiter(pollLimitWindow, time.Now),
+	}
 }
 
 // RegisterRoutes attaches analysis routes to the router group.
@@ -45,6 +51,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c)
 	ctx := withRequestID(c.Request.Context(), middleware.RequestIDFromContext(c))
 	documentID := c.Param("id")
+	c.Set("documentId", documentID)
 	if documentID == "" {
 		respond.Error(c, http.StatusBadRequest, "validation_error", "document id is required", nil)
 		return
@@ -73,7 +80,11 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		})
 		return
 	}
-	log.Printf("Starting analysis for user %s on document %s", userID, documentID)
+	telemetry.Info("analysis.start", map[string]any{
+		"request_id":  middleware.RequestIDFromContext(c),
+		"user_id":     userID,
+		"document_id": documentID,
+	})
 
 	doc, err := h.DocRepo.GetByID(c.Request.Context(), userID, documentID)
 	if err != nil {
@@ -108,6 +119,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		}
 		return
 	}
+	c.Set("analysisId", analysis.ID)
 
 	if !created && analysis.Status == StatusCompleted && analysis.Result != nil {
 		respond.JSON(c, http.StatusOK, gin.H{
@@ -143,6 +155,13 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 	}
 	if analysis.UserID != middleware.UserIDFromContext(c) {
 		respond.Error(c, http.StatusNotFound, "not_found", "analysis not found", nil)
+		return
+	}
+	c.Set("documentId", analysis.DocumentID)
+	c.Set("analysisId", analysis.ID)
+	if h.limiter != nil && !h.limiter.Allow(analysis.UserID, analysis.DocumentID) {
+		c.Header("Retry-After", strconv.Itoa(h.limiter.RetryAfterSeconds()))
+		respond.Error(c, http.StatusTooManyRequests, "rate_limited", "too many requests", nil)
 		return
 	}
 
