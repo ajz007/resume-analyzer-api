@@ -57,7 +57,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		return
 	}
 
-	req := startAnalysisRequest{PromptVersion: "v2_1"}
+	req := startAnalysisRequest{PromptVersion: "v2_3"}
 	if err := decodeOptionalJSON(c.Request.Body, &req); err != nil {
 		respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
 		return

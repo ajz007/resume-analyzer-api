@@ -26,6 +26,46 @@
       "Experience is consistent.",
       "Formatting is acceptable."
     ],
+    "scoreExplanation": {
+      "components": [
+        {
+          "key": "atsReadability",
+          "label": "ATS Readability",
+          "score": 75,
+          "weight": 25,
+          "explanation": "Readable layout with clear headings.",
+          "helped": ["Standard section titles", "Readable font size"],
+          "dragged": ["Minor alignment issues"]
+        },
+        {
+          "key": "skillMatch",
+          "label": "Skill Match",
+          "score": 70,
+          "weight": 30,
+          "explanation": "Most core skills are listed, a few gaps remain.",
+          "helped": ["CRM tools listed", "Pipeline management mentioned"],
+          "dragged": ["Missing automation tools"]
+        },
+        {
+          "key": "experienceRelevance",
+          "label": "Experience Relevance",
+          "score": 82,
+          "weight": 30,
+          "explanation": "Recent experience aligns with role scope.",
+          "helped": ["Recent sales role", "Quota achievement noted"],
+          "dragged": ["Limited leadership scope"]
+        },
+        {
+          "key": "resumeStructure",
+          "label": "Resume Structure",
+          "score": 73,
+          "weight": 15,
+          "explanation": "Logical flow with minor ordering issues.",
+          "helped": ["Clear section order", "Consistent bullet style"],
+          "dragged": ["Education section missing dates"]
+        }
+      ]
+    },
     "missingKeywords": {
       "fromJobDescription": [],
       "industryCommon": []

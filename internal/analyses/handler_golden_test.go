@@ -35,7 +35,7 @@ func TestAnalysisResultPassthroughV2_1(t *testing.T) {
 	fixture := loadFixture(t, "testdata/v1_good.json")
 	router, analysisRepo := setupAnalysisRouterWithLLM(t, fixture)
 
-	analysisID := startAnalysis(t, router)
+	analysisID := startAnalysis(t, router, "v1")
 	waitForStatus(t, analysisRepo, analysisID, StatusCompleted)
 
 	resp := getAnalysis(t, router, analysisID)
@@ -73,7 +73,7 @@ func TestAnalysisSortsSetLikeLists(t *testing.T) {
 	fixture := loadFixture(t, "testdata/v1_shuffled.json")
 	router, analysisRepo := setupAnalysisRouterWithLLM(t, fixture)
 
-	analysisID := startAnalysis(t, router)
+	analysisID := startAnalysis(t, router, "v1")
 	waitForStatus(t, analysisRepo, analysisID, StatusCompleted)
 
 	resp := getAnalysis(t, router, analysisID)
@@ -150,10 +150,11 @@ func setupAnalysisRouterWithLLM(t *testing.T, fixture []byte) (*gin.Engine, *Mem
 	return router, analysisRepo
 }
 
-func startAnalysis(t *testing.T, router *gin.Engine) string {
+func startAnalysis(t *testing.T, router *gin.Engine, promptVersion string) string {
 	t.Helper()
 	payload := map[string]string{
 		"jobDescription": strings.Repeat("a", 300),
+		"promptVersion":  promptVersion,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

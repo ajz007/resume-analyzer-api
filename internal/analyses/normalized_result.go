@@ -9,21 +9,23 @@ import (
 
 // NormalizedAnalysisResult is the single normalized response schema returned by the API.
 type NormalizedAnalysisResult struct {
-	Meta               MetaV2                   `json:"meta"`
-	Summary            SummaryV1                `json:"summary"`
-	ATS                NormalizedATS            `json:"ats"`
-	Issues             []IssueV2_2              `json:"issues"`
+	Meta               MetaV2                    `json:"meta"`
+	Summary            SummaryV1                 `json:"summary"`
+	ATS                NormalizedATS             `json:"ats"`
+	Issues             []IssueV2_2               `json:"issues"`
 	BulletRewrites     []NormalizedBulletRewrite `json:"bulletRewrites"`
-	MissingInformation []string                 `json:"missingInformation"`
-	ActionPlan         ActionPlanV1             `json:"actionPlan"`
+	MissingInformation []string                  `json:"missingInformation"`
+	ActionPlan         ActionPlanV1              `json:"actionPlan"`
+	Recommendations    []Recommendation          `json:"recommendations"`
 }
 
 type NormalizedATS struct {
-	Score            float64           `json:"score"`
-	ScoreBreakdown   ScoreBreakdownV2  `json:"scoreBreakdown"`
-	ScoreReasoning   []string          `json:"scoreReasoning"`
-	MissingKeywords  MissingKeywordsV2 `json:"missingKeywords"`
-	FormattingIssues []string          `json:"formattingIssues"`
+	Score            float64            `json:"score"`
+	ScoreBreakdown   ScoreBreakdownV2   `json:"scoreBreakdown"`
+	ScoreReasoning   []string           `json:"scoreReasoning"`
+	ScoreExplanation ScoreExplanationV1 `json:"scoreExplanation"`
+	MissingKeywords  MissingKeywordsV2  `json:"missingKeywords"`
+	FormattingIssues []string           `json:"formattingIssues"`
 }
 
 type NormalizedBulletRewrite struct {
@@ -85,6 +87,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2_3(parsed, analysis)
+		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_2"):
 		var parsed AnalysisResultV2_2
@@ -92,6 +95,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2_2(parsed, analysis)
+		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_1"):
 		var parsed AnalysisResultV2_1
@@ -99,6 +103,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2_1(parsed, analysis)
+		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2"):
 		var parsed AnalysisResultV2
@@ -106,6 +111,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2(parsed, analysis)
+		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
 		return out, validateNormalized(out)
 	default:
 		var parsed AnalysisResultV1
@@ -115,6 +121,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		topMissing := extractStringSlice(top["missingKeywords"])
 		topFormatting := extractStringSlice(top["formattingIssues"])
 		out := normalizeFromV1(parsed, analysis, topMissing, topFormatting)
+		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
 		return out, validateNormalized(out)
 	}
 }
@@ -163,6 +170,7 @@ func normalizeFromV1(r AnalysisResultV1, analysis Analysis, topMissing, topForma
 		Score:            clampScore(r.ATS.Score),
 		ScoreBreakdown:   ScoreBreakdownV2{},
 		ScoreReasoning:   []string{},
+		ScoreExplanation: ScoreExplanationV1{},
 		MissingKeywords:  MissingKeywordsV2{FromJobDescription: ensureStringSlice(missingKeywords), IndustryCommon: []string{}},
 		FormattingIssues: ensureStringSlice(formattingIssues),
 	}
@@ -203,6 +211,7 @@ func normalizeFromV1(r AnalysisResultV1, analysis Analysis, topMissing, topForma
 		BulletRewrites:     ensureBulletList(bullets),
 		MissingInformation: ensureStringSlice(r.MissingInformation),
 		ActionPlan:         normalizeActionPlan(r.ActionPlan),
+		Recommendations:    []Recommendation{},
 	}
 	return out
 }
@@ -213,6 +222,7 @@ func normalizeFromV2(r AnalysisResultV2, analysis Analysis) NormalizedAnalysisRe
 		Score:            clampScore(r.ATS.Score),
 		ScoreBreakdown:   clampScoreBreakdown(r.ATS.ScoreBreakdown),
 		ScoreReasoning:   []string{},
+		ScoreExplanation: ScoreExplanationV1{},
 		MissingKeywords:  normalizeMissingKeywords(r.ATS.MissingKeywords),
 		FormattingIssues: ensureStringSlice(r.ATS.FormattingIssues),
 	}
@@ -252,6 +262,7 @@ func normalizeFromV2(r AnalysisResultV2, analysis Analysis) NormalizedAnalysisRe
 		BulletRewrites:     ensureBulletList(bullets),
 		MissingInformation: ensureStringSlice(r.MissingInformation),
 		ActionPlan:         normalizeActionPlan(r.ActionPlan),
+		Recommendations:    []Recommendation{},
 	}
 }
 
@@ -261,6 +272,7 @@ func normalizeFromV2_1(r AnalysisResultV2_1, analysis Analysis) NormalizedAnalys
 		Score:            clampScore(r.ATS.Score),
 		ScoreBreakdown:   clampScoreBreakdown(r.ATS.ScoreBreakdown),
 		ScoreReasoning:   []string{},
+		ScoreExplanation: ScoreExplanationV1{},
 		MissingKeywords:  normalizeMissingKeywords(r.ATS.MissingKeywords),
 		FormattingIssues: ensureStringSlice(r.ATS.FormattingIssues),
 	}
@@ -300,6 +312,7 @@ func normalizeFromV2_1(r AnalysisResultV2_1, analysis Analysis) NormalizedAnalys
 		BulletRewrites:     ensureBulletList(bullets),
 		MissingInformation: ensureStringSlice(r.MissingInformation),
 		ActionPlan:         normalizeActionPlan(r.ActionPlan),
+		Recommendations:    []Recommendation{},
 	}
 }
 
@@ -309,6 +322,7 @@ func normalizeFromV2_2(r AnalysisResultV2_2, analysis Analysis) NormalizedAnalys
 		Score:            clampScore(r.ATS.Score),
 		ScoreBreakdown:   clampScoreBreakdown(r.ATS.ScoreBreakdown),
 		ScoreReasoning:   ensureStringSlice(r.ATS.ScoreReasoning),
+		ScoreExplanation: ScoreExplanationV1{},
 		MissingKeywords:  normalizeMissingKeywords(r.ATS.MissingKeywords),
 		FormattingIssues: ensureStringSlice(r.ATS.FormattingIssues),
 	}
@@ -333,6 +347,7 @@ func normalizeFromV2_2(r AnalysisResultV2_2, analysis Analysis) NormalizedAnalys
 		BulletRewrites:     ensureBulletList(bullets),
 		MissingInformation: ensureStringSlice(r.MissingInformation),
 		ActionPlan:         normalizeActionPlan(r.ActionPlan),
+		Recommendations:    []Recommendation{},
 	}
 }
 
@@ -342,6 +357,7 @@ func normalizeFromV2_3(r AnalysisResultV2_3, analysis Analysis) NormalizedAnalys
 		Score:            clampScore(r.ATS.Score),
 		ScoreBreakdown:   clampScoreBreakdown(r.ATS.ScoreBreakdown),
 		ScoreReasoning:   ensureStringSlice(r.ATS.ScoreReasoning),
+		ScoreExplanation: r.ATS.ScoreExplanation,
 		MissingKeywords:  normalizeMissingKeywords(r.ATS.MissingKeywords),
 		FormattingIssues: ensureStringSlice(r.ATS.FormattingIssues),
 	}
@@ -366,6 +382,7 @@ func normalizeFromV2_3(r AnalysisResultV2_3, analysis Analysis) NormalizedAnalys
 		BulletRewrites:     ensureBulletList(bullets),
 		MissingInformation: ensureStringSlice(r.MissingInformation),
 		ActionPlan:         normalizeActionPlan(r.ActionPlan),
+		Recommendations:    []Recommendation{},
 	}
 }
 
@@ -398,6 +415,7 @@ func normalizeATS(ats NormalizedATS) NormalizedATS {
 	ats.Score = clampScore(ats.Score)
 	ats.ScoreBreakdown = clampScoreBreakdown(ats.ScoreBreakdown)
 	ats.ScoreReasoning = ensureStringSlice(ats.ScoreReasoning)
+	ats.ScoreExplanation = normalizeScoreExplanation(ats.ScoreExplanation)
 	ats.MissingKeywords = normalizeMissingKeywords(ats.MissingKeywords)
 	ats.FormattingIssues = ensureStringSlice(ats.FormattingIssues)
 	return ats

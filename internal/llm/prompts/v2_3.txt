@@ -24,6 +24,19 @@ Schema requirements for v2_3:
       "roleFit": "integer"
     },
     "scoreReasoning": ["string (3-6 items)"],
+    "scoreExplanation": {
+      "components": [
+        {
+          "key": "atsReadability | skillMatch | experienceRelevance | resumeStructure",
+          "label": "string",
+          "score": "integer (0-100)",
+          "weight": "integer (0-100, totals 100 across components)",
+          "explanation": "string (short)",
+          "helped": ["string"],
+          "dragged": ["string"]
+        }
+      ]
+    },
     "missingKeywords": {
       "fromJobDescription": ["string"],
       "industryCommon": ["string"]
@@ -69,6 +82,14 @@ Score breakdown rules:
 - scoreBreakdown fields must sum to exactly 100.
 - Do not output decimals in scoreBreakdown.
 - scoreReasoning must be 3-6 short bullets and must align with the scoreBreakdown.
+
+Score explanation rules:
+- Provide 4 components with keys: atsReadability, skillMatch, experienceRelevance, resumeStructure.
+- Each component must include score (0-100), weight (0-100), a short explanation, and helped/dragged bullet lists.
+- Weights must sum to exactly 100.
+- If there are no negatives for a component, use a dragged item like "No major issues noted."
+- If there are no positives for a component, use a helped item like "Limited evidence in the resume."
+- The final ats.score should align with the weighted average of component scores.
 
 Issue rules:
 - Each issue must include severity, section, problem, whyItMatters, suggestion, evidence, fixEffort, priority, autoFixable, requiresUserInput.
