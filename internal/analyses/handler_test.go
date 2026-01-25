@@ -215,7 +215,11 @@ func TestStartAnalysisCompletedReturnsResult(t *testing.T) {
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
-	result := map[string]any{"summary": "done"}
+	result := map[string]any{
+		"summary":    "done",
+		"ats":        map[string]any{"score": 74.0},
+		"finalScore": 74.0,
+	}
 	analysis := Analysis{
 		ID:         "analysis-completed",
 		DocumentID: documentID,
@@ -262,6 +266,16 @@ func TestStartAnalysisCompletedReturnsResult(t *testing.T) {
 	if decoded.Result == nil {
 		t.Fatalf("expected result in response")
 	}
+	if got, ok := decoded.Result["finalScore"].(float64); !ok || got != 74 {
+		t.Fatalf("expected finalScore 74, got %v", decoded.Result["finalScore"])
+	}
+	atsRaw, ok := decoded.Result["ats"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ats in response")
+	}
+	if got, ok := atsRaw["score"].(float64); !ok || got != 74 {
+		t.Fatalf("expected ats.score 74, got %v", atsRaw["score"])
+	}
 }
 
 func TestStartAnalysisFailedRequiresRetry(t *testing.T) {
@@ -303,53 +317,54 @@ func TestStartAnalysisFailedRequiresRetry(t *testing.T) {
 	}
 }
 
-func TestGetAnalysisRateLimited(t *testing.T) {
+func TestListAnalysesIncludesFinalScore(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	now := time.Date(2026, time.January, 24, 12, 0, 0, 0, time.UTC)
-	limiter := newPollLimiter(2*time.Second, func() time.Time {
-		return now
-	})
-	router, analysisRepo := setupAnalysisRouterWithLimiter(t, limiter)
+	analysisRepo := NewMemoryRepo()
+	svc := &Service{Repo: analysisRepo}
+	handler := NewHandler(svc, nil)
 
-	userID := "guest:test-guest"
 	analysis := Analysis{
-		ID:         "analysis-rate",
+		ID:         "analysis-list",
 		DocumentID: "doc-1",
-		UserID:     userID,
-		Status:     StatusProcessing,
-		CreatedAt:  time.Now().UTC(),
+		UserID:     "user-1",
+		Status:     StatusCompleted,
+		Result: map[string]any{
+			"finalScore": 74.0,
+			"matchScore": 81.0,
+			"ats":        map[string]any{"score": 74.0},
+			"summary":    "done",
+		},
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
 		t.Fatalf("create analysis: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/analyses/"+analysis.ID, nil)
-	addGuestHeader(req)
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", resp.Code)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/analyses", nil)
+	c.Set("userId", "user-1")
+	c.Set("isGuest", false)
+
+	handler.listAnalyses(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/analyses/"+analysis.ID, nil)
-	addGuestHeader(req2)
-	resp2 := httptest.NewRecorder()
-	router.ServeHTTP(resp2, req2)
-	if resp2.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected status 429, got %d", resp2.Code)
+	var payload []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
-	if got := resp2.Header().Get("Retry-After"); got != "2" {
-		t.Fatalf("expected Retry-After 2, got %q", got)
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(payload))
 	}
-
-	now = now.Add(2 * time.Second)
-	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/analyses/"+analysis.ID, nil)
-	addGuestHeader(req3)
-	resp3 := httptest.NewRecorder()
-	router.ServeHTTP(resp3, req3)
-	if resp3.Code != http.StatusOK {
-		t.Fatalf("expected status 200 after window, got %d", resp3.Code)
+	item := payload[0]
+	if item["finalScore"] != 74.0 {
+		t.Fatalf("expected finalScore 74, got %v", item["finalScore"])
+	}
+	if item["matchScore"] != 81.0 {
+		t.Fatalf("expected matchScore 81, got %v", item["matchScore"])
 	}
 }
 
@@ -383,22 +398,6 @@ func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *Mem
 	handler.RegisterRoutes(api)
 
 	return router, docRepo, analysisRepo, store
-}
-
-func setupAnalysisRouterWithLimiter(t *testing.T, limiter *pollLimiter) (*gin.Engine, *MemoryRepo) {
-	t.Helper()
-	docRepo := documents.NewMemoryRepo()
-	analysisRepo := NewMemoryRepo()
-	svc := &Service{Repo: analysisRepo, DocRepo: docRepo}
-	handler := NewHandler(svc, docRepo)
-	handler.limiter = limiter
-
-	router := gin.New()
-	router.Use(middleware.Auth("dev"))
-	api := router.Group("/api/v1")
-	handler.RegisterRoutes(api)
-
-	return router, analysisRepo
 }
 
 func seedDocument(t *testing.T, repo *documents.MemoryRepo, store object.ObjectStore, userID string) string {

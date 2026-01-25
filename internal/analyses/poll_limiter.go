@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const pollLimitWindow = 2 * time.Second
+const pollLimitWindow = 1 * time.Second
 
 type pollLimiter struct {
 	mu      sync.Mutex

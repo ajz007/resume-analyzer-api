@@ -17,6 +17,7 @@ import (
 
 	sharedauth "resume-backend/internal/shared/auth"
 	"resume-backend/internal/shared/server/respond"
+	"resume-backend/internal/users"
 )
 
 // GoogleService handles Google OAuth flows.
@@ -25,10 +26,11 @@ type GoogleService struct {
 	uiRedirect  string
 	stateTTL    time.Duration
 	stateStore  *stateStore
+	users       *users.Service
 }
 
 // NewGoogleService builds a GoogleService.
-func NewGoogleService(clientID, clientSecret, redirectURL, uiRedirect string) *GoogleService {
+func NewGoogleService(clientID, clientSecret, redirectURL, uiRedirect string, usersSvc *users.Service) *GoogleService {
 	return &GoogleService{
 		oauthConfig: &oauth2.Config{
 			ClientID:     clientID,
@@ -43,6 +45,7 @@ func NewGoogleService(clientID, clientSecret, redirectURL, uiRedirect string) *G
 		uiRedirect: uiRedirect,
 		stateTTL:   5 * time.Minute,
 		stateStore: newStateStore(),
+		users:      usersSvc,
 	}
 }
 
@@ -96,6 +99,20 @@ func (s *GoogleService) callback(c *gin.Context) {
 		return
 	}
 
+	if s.users != nil {
+		if err := s.users.UpsertFromAuth(ctx, users.User{
+			ID:         "google:" + userInfo.Sub,
+			Email:      userInfo.Email,
+			FullName:   userInfo.Name,
+			GivenName:  userInfo.GivenName,
+			FamilyName: userInfo.FamilyName,
+			PictureURL: userInfo.Picture,
+		}); err != nil {
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to persist user profile", nil)
+			return
+		}
+	}
+
 	jwt, err := sharedauth.SignJWT(sharedauth.Claims{
 		Sub:     "google:" + userInfo.Sub,
 		Email:   userInfo.Email,
@@ -117,11 +134,13 @@ func (s *GoogleService) callback(c *gin.Context) {
 }
 
 type googleUserInfo struct {
-	Sub     string `json:"sub"`
-	ID      string `json:"id"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
+	Sub        string `json:"sub"`
+	ID         string `json:"id"`
+	Email      string `json:"email"`
+	Name       string `json:"name"`
+	GivenName  string `json:"given_name"`
+	FamilyName string `json:"family_name"`
+	Picture    string `json:"picture"`
 }
 
 func (s *GoogleService) fetchUserInfo(ctx context.Context, token *oauth2.Token) (googleUserInfo, error) {

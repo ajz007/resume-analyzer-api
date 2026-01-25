@@ -101,6 +101,11 @@ Issue rules:
 
 Bullet rewrites rules:
 - If the resume does not explicitly state revenue growth %, do NOT say "double-digit growth" or similar.
+- Never use the phrase "double-digit" unless it appears verbatim in the resume evidence snippet.
+- If the resume does not provide an exact value, use placeholders like "X% (replace with exact figure)" and set:
+  - claimSupport="placeholder"
+  - metricsSource="placeholder"
+  - placeholdersNeeded to include an appropriate token (e.g., revenue_growth_pct)
 - For each rewrite, set claimSupport:
   - "supported" if evidence snippet supports the key claim
   - "inferred" if it’s a mild rephrase without adding new outcomes

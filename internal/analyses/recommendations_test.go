@@ -3,45 +3,39 @@ package analyses
 import (
 	"reflect"
 	"testing"
+
+	"resume-backend/internal/analyses/recommendations"
 )
 
 func TestRecommendationsDeterministicOrdering(t *testing.T) {
-	result := NormalizedAnalysisResult{
-		ATS: NormalizedATS{
-			MissingKeywords:  MissingKeywordsV2{FromJobDescription: []string{}},
-			FormattingIssues: []string{},
-		},
-		ActionPlan: ActionPlanV1{},
-		Issues: []IssueV2_2{
+	input := recommendations.Input{
+		Issues: []recommendations.Issue{
 			{
-				Severity:     IssueSeverityCritical,
+				Severity:     string(IssueSeverityCritical),
 				Section:      "Experience",
 				Problem:      "Missing impact metrics",
 				WhyItMatters: "Recruiters look for measurable impact.",
 				Suggestion:   "Add quantified outcomes.",
-				Priority:     2,
 			},
 			{
-				Severity:     IssueSeverityMedium,
+				Severity:     string(IssueSeverityMedium),
 				Section:      "Formatting",
 				Problem:      "Inconsistent bullets",
 				WhyItMatters: "Inconsistent bullets reduce readability.",
 				Suggestion:   "Normalize bullet formatting.",
-				Priority:     1,
 			},
 			{
-				Severity:     IssueSeverityLow,
+				Severity:     string(IssueSeverityLow),
 				Section:      "Summary",
 				Problem:      "Summary is generic",
 				WhyItMatters: "Generic summary weakens differentiation.",
 				Suggestion:   "Customize summary for the role.",
-				Priority:     3,
 			},
 		},
 	}
 
-	first := buildRecommendations(result)
-	second := buildRecommendations(result)
+	first := recommendations.GenerateRecommendations(input)
+	second := recommendations.GenerateRecommendations(input)
 
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("expected deterministic recommendations ordering")
@@ -49,14 +43,21 @@ func TestRecommendationsDeterministicOrdering(t *testing.T) {
 }
 
 func TestRecommendationsMaxSeven(t *testing.T) {
-	missing := []string{"k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8"}
-	result := NormalizedAnalysisResult{
-		ATS: NormalizedATS{
-			MissingKeywords: MissingKeywordsV2{FromJobDescription: missing},
-		},
+	issues := make([]recommendations.Issue, 0, 12)
+	for i := 0; i < 12; i++ {
+		issues = append(issues, recommendations.Issue{
+			Severity:     string(IssueSeverityLow),
+			Section:      "Experience",
+			Problem:      "Issue " + string(rune('A'+i)),
+			WhyItMatters: "Why",
+			Suggestion:   "Do something",
+		})
+	}
+	input := recommendations.Input{
+		Issues: issues,
 	}
 
-	recs := buildRecommendations(result)
+	recs := recommendations.GenerateRecommendations(input)
 	if len(recs) != 7 {
 		t.Fatalf("expected 7 recommendations, got %d", len(recs))
 	}
@@ -68,14 +69,41 @@ func TestRecommendationsMaxSeven(t *testing.T) {
 }
 
 func TestRecommendationsDedup(t *testing.T) {
-	result := NormalizedAnalysisResult{
-		ATS: NormalizedATS{
-			FormattingIssues: []string{"Extra spaces", "Extra spaces"},
+	input := recommendations.Input{
+		Issues: []recommendations.Issue{
+			{
+				Severity:     string(IssueSeverityMedium),
+				Section:      "Formatting",
+				Problem:      "Inconsistent bullets",
+				WhyItMatters: "Why",
+				Suggestion:   "Fix bullets",
+			},
+			{
+				Severity:     string(IssueSeverityMedium),
+				Section:      "Formatting",
+				Problem:      "Inconsistent bullets",
+				WhyItMatters: "Why",
+				Suggestion:   "Fix bullets",
+			},
 		},
 	}
 
-	recs := buildRecommendations(result)
+	recs := recommendations.GenerateRecommendations(input)
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 recommendation after dedupe, got %d", len(recs))
+	}
+}
+
+func TestRecommendationsMissingJDKeywords(t *testing.T) {
+	input := recommendations.Input{
+		MissingJDKeywords: []string{"Kafka", "Golang", "AWS"},
+	}
+
+	recs := recommendations.GenerateRecommendations(input)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+	if recs[0].ID != "ATS_MISSING_JD_KEYWORDS" {
+		t.Fatalf("expected ATS_MISSING_JD_KEYWORDS id, got %q", recs[0].ID)
 	}
 }

@@ -47,3 +47,89 @@ func TestNormalizeClampsScore(t *testing.T) {
 		t.Fatalf("expected score to clamp to 100, got %v (%s)", score, payload)
 	}
 }
+
+func TestNormalizeFinalAndMatchScoreFromTopLevel(t *testing.T) {
+	raw := []byte(`{
+  "matchScore": 88,
+  "meta": {
+    "promptVersion": "v2_3",
+    "model": "test-model",
+    "jobDescriptionProvided": true,
+    "confidence": 0.5,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {"overallAssessment": "ok", "strengths": [], "weaknesses": []},
+  "ats": {
+    "score": 74,
+    "scoreBreakdown": {"skills": 20, "experience": 20, "impact": 20, "formatting": 20, "roleFit": 20},
+    "scoreReasoning": ["a", "b", "c"],
+    "scoreExplanation": {
+      "components": [
+        {"key": "atsReadability", "label": "ATS Readability", "score": 75, "weight": 25, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "skillMatch", "label": "Skill Match", "score": 70, "weight": 30, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "experienceRelevance", "label": "Experience Relevance", "score": 80, "weight": 30, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "resumeStructure", "label": "Resume Structure", "score": 78, "weight": 15, "explanation": "x", "helped": ["a"], "dragged": ["b"]}
+      ]
+    },
+    "missingKeywords": {"fromJobDescription": ["a", "b", "c"], "industryCommon": []},
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {"quickWins": [], "mediumEffort": [], "deepFixes": []}
+}`)
+	analysis := Analysis{PromptVersion: "v2_3", Model: "test-model"}
+	result, err := normalizeAnalysisResult(raw, analysis)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, ok := result["finalScore"].(float64); !ok || got != 74 {
+		t.Fatalf("expected finalScore 74, got %v", result["finalScore"])
+	}
+	if got, ok := result["matchScore"].(float64); !ok || got != 88 {
+		t.Fatalf("expected matchScore 88, got %v", result["matchScore"])
+	}
+}
+
+func TestNormalizeMatchScoreFromMissingKeywords(t *testing.T) {
+	raw := []byte(`{
+  "meta": {
+    "promptVersion": "v2_3",
+    "model": "test-model",
+    "jobDescriptionProvided": true,
+    "confidence": 0.5,
+    "assumptions": [],
+    "limitations": []
+  },
+  "summary": {"overallAssessment": "ok", "strengths": [], "weaknesses": []},
+  "ats": {
+    "score": 70,
+    "scoreBreakdown": {"skills": 20, "experience": 20, "impact": 20, "formatting": 20, "roleFit": 20},
+    "scoreReasoning": ["a", "b", "c"],
+    "scoreExplanation": {
+      "components": [
+        {"key": "atsReadability", "label": "ATS Readability", "score": 75, "weight": 25, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "skillMatch", "label": "Skill Match", "score": 70, "weight": 30, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "experienceRelevance", "label": "Experience Relevance", "score": 80, "weight": 30, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "resumeStructure", "label": "Resume Structure", "score": 78, "weight": 15, "explanation": "x", "helped": ["a"], "dragged": ["b"]}
+      ]
+    },
+    "missingKeywords": {"fromJobDescription": ["a", "b", "c"], "industryCommon": []},
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {"quickWins": [], "mediumEffort": [], "deepFixes": []}
+}`)
+	analysis := Analysis{PromptVersion: "v2_3", Model: "test-model"}
+	result, err := normalizeAnalysisResult(raw, analysis)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, ok := result["matchScore"].(float64); !ok || got != 85 {
+		t.Fatalf("expected matchScore 85, got %v", result["matchScore"])
+	}
+}

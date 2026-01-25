@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +22,6 @@ import (
 type Handler struct {
 	Svc     *Service
 	DocRepo documents.DocumentsRepo
-	limiter *pollLimiter
 }
 
 // NewHandler constructs a Handler.
@@ -31,7 +29,6 @@ func NewHandler(svc *Service, docRepo documents.DocumentsRepo) *Handler {
 	return &Handler{
 		Svc:     svc,
 		DocRepo: docRepo,
-		limiter: newPollLimiter(pollLimitWindow, time.Now),
 	}
 }
 
@@ -46,6 +43,8 @@ type startAnalysisRequest struct {
 	JobDescription string `json:"jobDescription"`
 	PromptVersion  string `json:"promptVersion"`
 }
+
+const defaultPollAfterMs = 2000
 
 func (h *Handler) startAnalysis(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c)
@@ -131,8 +130,9 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	}
 
 	respond.JSON(c, http.StatusAccepted, gin.H{
-		"analysisId": analysis.ID,
-		"status":     analysis.Status,
+		"analysisId":  analysis.ID,
+		"status":      analysis.Status,
+		"pollAfterMs": defaultPollAfterMs,
 	})
 }
 
@@ -159,11 +159,6 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 	}
 	c.Set("documentId", analysis.DocumentID)
 	c.Set("analysisId", analysis.ID)
-	if h.limiter != nil && !h.limiter.Allow(analysis.UserID, analysis.DocumentID) {
-		c.Header("Retry-After", strconv.Itoa(h.limiter.RetryAfterSeconds()))
-		respond.Error(c, http.StatusTooManyRequests, "rate_limited", "too many requests", nil)
-		return
-	}
 
 	resp := gin.H{
 		"id":     analysis.ID,
@@ -186,6 +181,9 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 	}
 	if analysis.Status == StatusCompleted && analysis.Result != nil {
 		resp["result"] = analysis.Result
+	}
+	if analysis.Status == StatusQueued || analysis.Status == StatusProcessing {
+		resp["pollAfterMs"] = defaultPollAfterMs
 	}
 
 	respond.JSON(c, http.StatusOK, resp)
@@ -236,7 +234,18 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 			"status":     a.Status,
 			"createdAt":  a.CreatedAt,
 		}
+		if a.StartedAt != nil {
+			item["startedAt"] = a.StartedAt
+		}
+		if a.CompletedAt != nil {
+			item["completedAt"] = a.CompletedAt
+		}
 		if a.Status == StatusCompleted && a.Result != nil {
+			if finalScore, ok := extractFinalScore(a.Result); ok {
+				item["finalScore"] = finalScore
+			} else {
+				item["finalScore"] = nil
+			}
 			if ms, ok := a.Result["matchScore"]; ok {
 				item["matchScore"] = ms
 			}
@@ -248,6 +257,44 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 	}
 
 	respond.JSON(c, http.StatusOK, resp)
+}
+
+func extractFinalScore(result map[string]any) (float64, bool) {
+	if result == nil {
+		return 0, false
+	}
+	if score, ok := extractFloatAny(result["finalScore"]); ok {
+		return score, true
+	}
+	if atsRaw, ok := result["ats"]; ok {
+		if ats, ok := atsRaw.(map[string]any); ok {
+			if score, ok := extractFloatAny(ats["score"]); ok {
+				return score, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func extractFloatAny(value any) (float64, bool) {
+	switch raw := value.(type) {
+	case float64:
+		return raw, true
+	case float32:
+		return float64(raw), true
+	case int:
+		return float64(raw), true
+	case int64:
+		return float64(raw), true
+	case json.Number:
+		parsed, err := raw.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
 }
 
 func decodeOptionalJSON(body io.ReadCloser, out any) error {

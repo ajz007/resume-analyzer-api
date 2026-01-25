@@ -6,15 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"resume-backend/internal/llm"
 )
 
-const contentRepairSystemMessage = "Remove any unsupported impact claims (e.g., double-digit, significant) unless explicitly stated in resume. Keep JSON only."
+const contentRepairSystemMessage = "Remove any unsupported impact claims (e.g., double-digit, significant) unless explicitly stated in resume. Never use \"double-digit\" unless it appears verbatim in resume evidence. If an exact value is missing, replace with placeholder \"X% (replace with exact figure)\", set claimSupport=placeholder, metricsSource=placeholder, and add placeholdersNeeded (e.g., revenue_growth_pct). Keep JSON only."
 
 var forbiddenImpactTerms = []string{
 	"double-digit",
+	"double digit",
 	"significant",
 	"substantial",
 	"massive",
@@ -120,6 +122,19 @@ func ValidateV2_3WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		}
 		if err := ValidateContentV2_3(&parsed); err != nil {
 			log.Printf("v2_3 content attempt=2 error=%s", sanitizeError(err))
+			changed, _ := sanitizeBulletRewriteTerms(&parsed)
+			if changed {
+				if err := parsed.Validate(); err != nil {
+					return nil, err
+				}
+				if err := ValidateContentV2_3(&parsed); err == nil {
+					payload, marshalErr := json.Marshal(parsed)
+					if marshalErr != nil {
+						return nil, marshalErr
+					}
+					return payload, nil
+				}
+			}
 			return nil, err
 		}
 		return rawRetry, nil
@@ -146,13 +161,124 @@ func parseAndValidateV2_3(raw []byte, out *AnalysisResultV2_3) error {
 }
 
 func containsForbiddenTerm(text string) (string, bool) {
-	lower := strings.ToLower(text)
+	lower := normalizeForMatch(text)
 	for _, term := range forbiddenImpactTerms {
 		if strings.Contains(lower, term) {
 			return term, true
 		}
 	}
 	return "", false
+}
+
+func sanitizeBulletRewriteTerms(r *AnalysisResultV2_3) (bool, []string) {
+	if r == nil {
+		return false, nil
+	}
+	changed := false
+	var notes []string
+	for i := range r.BulletRewrites {
+		after := r.BulletRewrites[i].After
+		if after == "" {
+			continue
+		}
+		updated, replacements := replaceForbiddenTerms(after)
+		if len(replacements) == 0 {
+			continue
+		}
+		r.BulletRewrites[i].After = updated
+		r.BulletRewrites[i].ClaimSupport = "placeholder"
+		r.BulletRewrites[i].MetricsSource = "placeholder"
+		r.BulletRewrites[i].Evidence = "notFound"
+		if r.BulletRewrites[i].PlaceholdersNeeded == nil {
+			r.BulletRewrites[i].PlaceholdersNeeded = []string{}
+		}
+		addPlaceholderNeeded(&r.BulletRewrites[i], "revenue_growth_pct")
+		appendRationalePlaceholder(&r.BulletRewrites[i])
+		changed = true
+		for _, repl := range replacements {
+			notes = append(notes, "bulletRewrites["+strconv.Itoa(i)+"] replaced "+repl)
+		}
+	}
+	return changed, notes
+}
+
+func replaceForbiddenTerms(input string) (string, []string) {
+	replacements := map[string]string{
+		"double-digit": "X% (replace with exact figure)",
+		"double digit": "X% (replace with exact figure)",
+		"significant":  "measurable",
+		"substantial":  "measurable",
+		"massive":      "measurable",
+		"remarkable":   "measurable",
+	}
+	updated := input
+	normalized := normalizeForMatch(updated)
+	var applied []string
+	for term, repl := range replacements {
+		if strings.Contains(normalized, term) {
+			for _, variant := range termVariants(term) {
+				updated = replaceInsensitive(updated, variant, repl)
+			}
+			applied = append(applied, term+"->"+repl)
+			normalized = normalizeForMatch(updated)
+		}
+	}
+	return updated, applied
+}
+
+func normalizeForMatch(text string) string {
+	lower := strings.ToLower(text)
+	for _, r := range []string{"\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"} {
+		lower = strings.ReplaceAll(lower, r, "-")
+	}
+	lower = strings.Join(strings.Fields(lower), " ")
+	return lower
+}
+
+func termVariants(term string) []string {
+	var variants []string
+	variants = append(variants, term)
+	if strings.Contains(term, "-") {
+		variants = append(variants, strings.ReplaceAll(term, "-", " "))
+		for _, r := range []string{"\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"} {
+			variants = append(variants, strings.ReplaceAll(term, "-", r))
+		}
+	}
+	return variants
+}
+
+func replaceInsensitive(input, term, replacement string) string {
+	out := input
+	out = strings.ReplaceAll(out, term, replacement)
+	out = strings.ReplaceAll(out, strings.ToUpper(term), replacement)
+	out = strings.ReplaceAll(out, strings.Title(term), replacement)
+	return out
+}
+
+func addPlaceholderNeeded(br *BulletRewriteV2_3, placeholder string) {
+	if br == nil {
+		return
+	}
+	for _, item := range br.PlaceholdersNeeded {
+		if strings.EqualFold(item, placeholder) {
+			return
+		}
+	}
+	br.PlaceholdersNeeded = append(br.PlaceholdersNeeded, placeholder)
+}
+
+func appendRationalePlaceholder(br *BulletRewriteV2_3) {
+	if br == nil {
+		return
+	}
+	if strings.Contains(strings.ToLower(br.Rationale), "replace placeholders before final submission") {
+		return
+	}
+	if strings.TrimSpace(br.Rationale) == "" {
+		br.Rationale = "Replace placeholders before final submission."
+		return
+	}
+	br.Rationale = strings.TrimSpace(br.Rationale) + " Replace placeholders before final submission."
 }
 
 // SanitizeV2_3 trims and normalizes display-only fields before content validation.
