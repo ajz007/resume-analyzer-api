@@ -12,11 +12,20 @@ import (
 type AnalysisResultV2_3 struct {
 	Meta               MetaV2              `json:"meta"`
 	Summary            SummaryV1           `json:"summary"`
-	ATS                ATSV2_2             `json:"ats"`
+	ATS                ATSV2_3             `json:"ats"`
 	Issues             []IssueV2_2         `json:"issues"`
 	BulletRewrites     []BulletRewriteV2_3 `json:"bulletRewrites"`
 	MissingInformation []string            `json:"missingInformation"`
 	ActionPlan         ActionPlanV1        `json:"actionPlan"`
+}
+
+type ATSV2_3 struct {
+	Score            float64            `json:"score"`
+	ScoreBreakdown   ScoreBreakdownV2   `json:"scoreBreakdown"`
+	ScoreReasoning   []string           `json:"scoreReasoning"`
+	ScoreExplanation ScoreExplanationV1 `json:"scoreExplanation"`
+	MissingKeywords  MissingKeywordsV2  `json:"missingKeywords"`
+	FormattingIssues []string           `json:"formattingIssues"`
 }
 
 type BulletRewriteV2_3 struct {
@@ -56,6 +65,9 @@ func (r *AnalysisResultV2_3) Validate() error {
 		return errors.New("ats.scoreReasoning must have 3-6 items")
 	}
 	if err := validateScoreBreakdownV2_3(&r.ATS.ScoreBreakdown); err != nil {
+		return err
+	}
+	if err := validateScoreExplanationV1(&r.ATS.ScoreExplanation); err != nil {
 		return err
 	}
 

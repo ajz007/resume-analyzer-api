@@ -46,7 +46,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		return Analysis{}, errors.New("documentID and userID are required")
 	}
 	if promptVersion == "" {
-		promptVersion = "v2_1"
+		promptVersion = "v2_3"
 	}
 
 	if s.Usage != nil {
@@ -93,7 +93,7 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 		return Analysis{}, false, errors.New("documentID and userID are required")
 	}
 	if promptVersion == "" {
-		promptVersion = "v2_1"
+		promptVersion = "v2_3"
 	}
 
 	analysis := Analysis{

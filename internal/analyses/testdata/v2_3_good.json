@@ -26,6 +26,46 @@
       "Impact is supported by metrics.",
       "Formatting is acceptable."
     ],
+    "scoreExplanation": {
+      "components": [
+        {
+          "key": "atsReadability",
+          "label": "ATS Readability",
+          "score": 78,
+          "weight": 25,
+          "explanation": "Clear headings and ATS-friendly formatting.",
+          "helped": ["Standard section titles", "Consistent fonts"],
+          "dragged": ["Minor spacing inconsistencies"]
+        },
+        {
+          "key": "skillMatch",
+          "label": "Skill Match",
+          "score": 72,
+          "weight": 30,
+          "explanation": "Core skills are present but a few keywords are missing.",
+          "helped": ["CRM listed", "Sales tools mentioned"],
+          "dragged": ["Missing some role-specific keywords"]
+        },
+        {
+          "key": "experienceRelevance",
+          "label": "Experience Relevance",
+          "score": 84,
+          "weight": 30,
+          "explanation": "Recent roles align with the target responsibilities.",
+          "helped": ["Recent sales experience", "Metrics tied to outcomes"],
+          "dragged": ["Limited detail on cross-functional work"]
+        },
+        {
+          "key": "resumeStructure",
+          "label": "Resume Structure",
+          "score": 76,
+          "weight": 15,
+          "explanation": "Overall flow is good with minor ordering gaps.",
+          "helped": ["Clear sections", "Concise bullet points"],
+          "dragged": ["Projects section lacks dates"]
+        }
+      ]
+    },
     "missingKeywords": {
       "fromJobDescription": [],
       "industryCommon": ["crm"]
