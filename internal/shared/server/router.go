@@ -7,9 +7,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"resume-backend/internal/account"
 	"resume-backend/internal/analyses"
 	"resume-backend/internal/applies"
 	googleauth "resume-backend/internal/auth"
@@ -26,6 +28,7 @@ import (
 	localstore "resume-backend/internal/shared/storage/object/local"
 	s3store "resume-backend/internal/shared/storage/object/s3"
 	"resume-backend/internal/usage"
+	"resume-backend/internal/users"
 )
 
 // NewRouter constructs the Gin engine with middleware and routes registered.
@@ -39,6 +42,14 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		middleware.Recovery(),
 		middleware.CORS(cfg.CORSAllowOrigin),
 		middleware.Auth(cfg.Env),
+		middleware.RateLimit(middleware.RateLimitConfig{
+			DefaultGroup: "DEFAULT",
+			GroupFor:     rateLimitGroupFor,
+			Rules: map[string]middleware.RateLimitRule{
+				"DEFAULT": {Rate: 4, Burst: 8},
+				"POLLING": {Rate: 12, Burst: 24},
+			},
+		}),
 	)
 
 	r.GET("/metrics", metrics.Handler())
@@ -126,6 +137,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		AnalysisVersion: cfg.AnalysisVersion,
 	}
 	analysisHandler := analyses.NewHandler(analysisSvc, docRepo)
+	accountHandler := account.NewHandler(account.NewService(docRepo, analysisRepo))
 	generatedResumeSvc := &generatedresumes.Service{
 		Repo:         generatedResumeRepo,
 		AnalysisRepo: analysisAdapter{repo: analysisRepo},
@@ -141,16 +153,25 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		LLM:           applyLLMClient,
 	}
 	applyHandler := applies.NewHandler(applySvc, generatedResumeRepo, store)
-	googleAuthSvc := googleauth.NewGoogleService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, cfg.UIRedirectURL)
+	var userRepo users.Repo
+	if sqlDB != nil {
+		userRepo = &users.PGRepo{DB: sqlDB}
+	} else {
+		userRepo = users.NewMemoryRepo()
+	}
+	userSvc := users.NewService(userRepo)
+
+	googleAuthSvc := googleauth.NewGoogleService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, cfg.UIRedirectURL, userSvc)
 
 	api := r.Group("/api/v1")
 	api.GET("/health", func(c *gin.Context) {
 		respond.JSON(c, http.StatusOK, gin.H{"ok": true})
 	})
 	googleAuthSvc.RegisterRoutes(api)
-	registerMeRoutes(api)
 	docHandler.RegisterRoutes(api)
+	accountHandler.RegisterRoutes(api)
 	analysisHandler.RegisterRoutes(api)
+	users.NewHandler(userSvc).RegisterRoutes(api)
 	usageHandler.RegisterRoutes(api)
 	applyHandler.RegisterRoutes(api)
 	if cfg.Env == "dev" {
@@ -159,6 +180,23 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	}
 
 	return r
+}
+
+func rateLimitGroupFor(c *gin.Context) string {
+	if c == nil {
+		return "DEFAULT"
+	}
+	if strings.ToUpper(c.Request.Method) != http.MethodGet {
+		return "DEFAULT"
+	}
+	switch c.FullPath() {
+	case "/api/v1/analyses/:id",
+		"/api/v1/documents/:id",
+		"/api/v1/documents/:id/status":
+		return "POLLING"
+	default:
+		return "DEFAULT"
+	}
 }
 
 type analysisAdapter struct {

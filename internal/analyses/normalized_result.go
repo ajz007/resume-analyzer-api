@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"resume-backend/internal/analyses/recommendations"
 )
 
 // NormalizedAnalysisResult is the single normalized response schema returned by the API.
@@ -12,6 +14,8 @@ type NormalizedAnalysisResult struct {
 	Meta               MetaV2                    `json:"meta"`
 	Summary            SummaryV1                 `json:"summary"`
 	ATS                NormalizedATS             `json:"ats"`
+	FinalScore         float64                   `json:"finalScore"`
+	MatchScore         float64                   `json:"matchScore"`
 	Issues             []IssueV2_2               `json:"issues"`
 	BulletRewrites     []NormalizedBulletRewrite `json:"bulletRewrites"`
 	MissingInformation []string                  `json:"missingInformation"`
@@ -87,7 +91,8 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2_3(parsed, analysis)
-		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
+		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
+		applyScores(&out, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_2"):
 		var parsed AnalysisResultV2_2
@@ -95,7 +100,8 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2_2(parsed, analysis)
-		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
+		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
+		applyScores(&out, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_1"):
 		var parsed AnalysisResultV2_1
@@ -103,7 +109,8 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2_1(parsed, analysis)
-		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
+		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
+		applyScores(&out, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2"):
 		var parsed AnalysisResultV2
@@ -111,7 +118,8 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 			return NormalizedAnalysisResult{}, err
 		}
 		out := normalizeFromV2(parsed, analysis)
-		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
+		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
+		applyScores(&out, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	default:
 		var parsed AnalysisResultV1
@@ -121,7 +129,8 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		topMissing := extractStringSlice(top["missingKeywords"])
 		topFormatting := extractStringSlice(top["formattingIssues"])
 		out := normalizeFromV1(parsed, analysis, topMissing, topFormatting)
-		out.Recommendations = normalizeRecommendations(buildRecommendations(out))
+		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
+		applyScores(&out, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	}
 }
@@ -142,6 +151,9 @@ func validateNormalized(out NormalizedAnalysisResult) error {
 	}
 	if strings.TrimSpace(out.Meta.PromptVersion) == "" || strings.TrimSpace(out.Meta.Model) == "" {
 		return errors.New("meta.promptVersion and meta.model are required")
+	}
+	if out.Recommendations == nil {
+		return errors.New("recommendations must be a list")
 	}
 	return nil
 }
@@ -421,6 +433,55 @@ func normalizeATS(ats NormalizedATS) NormalizedATS {
 	return ats
 }
 
+func applyScores(out *NormalizedAnalysisResult, matchScore *float64) {
+	if out == nil {
+		return
+	}
+	out.FinalScore = clampScore(out.ATS.Score)
+	if matchScore != nil {
+		out.MatchScore = clampScore(*matchScore)
+		return
+	}
+	if out.Meta.JobDescriptionProvided {
+		out.MatchScore = calculateMatchScore(out.ATS.MissingKeywords.FromJobDescription)
+	}
+}
+
+func calculateMatchScore(missingJDKeywords []string) float64 {
+	missing := len(ensureStringSlice(missingJDKeywords))
+	if missing <= 0 {
+		return 100
+	}
+	score := 100 - float64(missing*5)
+	return clampScore(score)
+}
+
+func buildRecommendationInput(out NormalizedAnalysisResult) recommendations.Input {
+	issues := make([]recommendations.Issue, 0, len(out.Issues))
+	for _, issue := range out.Issues {
+		issues = append(issues, recommendations.Issue{
+			Severity:     string(issue.Severity),
+			Section:      issue.Section,
+			Problem:      issue.Problem,
+			WhyItMatters: issue.WhyItMatters,
+			Suggestion:   issue.Suggestion,
+		})
+	}
+	actionPlan := recommendations.ActionPlan{
+		QuickWins:    ensureStringSlice(out.ActionPlan.QuickWins),
+		MediumEffort: ensureStringSlice(out.ActionPlan.MediumEffort),
+		DeepFixes:    ensureStringSlice(out.ActionPlan.DeepFixes),
+	}
+	return recommendations.Input{
+		Issues:               issues,
+		MissingJDKeywords:    ensureStringSlice(out.ATS.MissingKeywords.FromJobDescription),
+		MissingIndustryTerms: ensureStringSlice(out.ATS.MissingKeywords.IndustryCommon),
+		FormattingIssues:     ensureStringSlice(out.ATS.FormattingIssues),
+		ActionPlan:           actionPlan,
+		MissingInformation:   ensureStringSlice(out.MissingInformation),
+	}
+}
+
 func normalizeMissingKeywords(m MissingKeywordsV2) MissingKeywordsV2 {
 	m.FromJobDescription = ensureStringSlice(m.FromJobDescription)
 	m.IndustryCommon = ensureStringSlice(m.IndustryCommon)
@@ -547,4 +608,25 @@ func extractStringSlice(value any) []string {
 	default:
 		return nil
 	}
+}
+
+func extractFloat(value any) *float64 {
+	switch raw := value.(type) {
+	case float64:
+		return &raw
+	case float32:
+		val := float64(raw)
+		return &val
+	case int:
+		val := float64(raw)
+		return &val
+	case int64:
+		val := float64(raw)
+		return &val
+	case json.Number:
+		if parsed, err := raw.Float64(); err == nil {
+			return &parsed
+		}
+	}
+	return nil
 }

@@ -131,4 +131,18 @@ WHERE user_id = $3 AND id = $4 AND extracted_text_key IS NULL`
 	return err
 }
 
+// ClaimGuest reassigns documents owned by a guest user to an authenticated user.
+func (r *PGRepo) ClaimGuest(ctx context.Context, guestUserID, authedUserID string) (int, error) {
+	const query = `
+UPDATE documents
+SET user_id = $1
+WHERE user_id = $2 AND deleted_at IS NULL`
+	res, err := r.DB.ExecContext(ctx, query, authedUserID, guestUserID)
+	if err != nil {
+		return 0, err
+	}
+	updated, _ := res.RowsAffected()
+	return int(updated), nil
+}
+
 var _ DocumentsRepo = (*PGRepo)(nil)

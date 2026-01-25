@@ -117,3 +117,23 @@ func (r *MemoryRepo) ListByUser(ctx context.Context, userId string, limit, offse
 
 	return docs[offset:end], nil
 }
+
+// ClaimGuest reassigns documents owned by a guest user to an authenticated user.
+func (r *MemoryRepo) ClaimGuest(ctx context.Context, guestUserID, authedUserID string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	guestDocs := r.data[guestUserID]
+	if len(guestDocs) == 0 {
+		return 0, nil
+	}
+	for i := range guestDocs {
+		guestDocs[i].UserID = authedUserID
+	}
+	r.data[authedUserID] = append(r.data[authedUserID], guestDocs...)
+	delete(r.data, guestUserID)
+	return len(guestDocs), nil
+}

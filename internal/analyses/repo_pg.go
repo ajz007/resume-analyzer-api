@@ -102,6 +102,20 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 	return err
 }
 
+// ClaimGuest reassigns analyses owned by a guest user to an authenticated user.
+func (r *PGRepo) ClaimGuest(ctx context.Context, guestUserID, authedUserID string) (int, error) {
+	const query = `
+UPDATE analyses
+SET user_id = $1
+WHERE user_id = $2 AND deleted_at IS NULL`
+	res, err := r.DB.ExecContext(ctx, query, authedUserID, guestUserID)
+	if err != nil {
+		return 0, err
+	}
+	updated, _ := res.RowsAffected()
+	return int(updated), nil
+}
+
 // GetByID returns an analysis by ID.
 func (r *PGRepo) GetByID(ctx context.Context, analysisID string) (Analysis, error) {
 	const query = `

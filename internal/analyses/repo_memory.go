@@ -276,3 +276,24 @@ func (r *MemoryRepo) ListByUser(ctx context.Context, userID string, limit, offse
 	}
 	return analyses[offset:end], nil
 }
+
+// ClaimGuest reassigns analyses owned by a guest user to an authenticated user.
+func (r *MemoryRepo) ClaimGuest(ctx context.Context, guestUserID, authedUserID string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	guestAnalyses := r.byUser[guestUserID]
+	if len(guestAnalyses) == 0 {
+		return 0, nil
+	}
+	for i := range guestAnalyses {
+		guestAnalyses[i].UserID = authedUserID
+		r.byID[guestAnalyses[i].ID] = guestAnalyses[i]
+	}
+	r.byUser[authedUserID] = append(r.byUser[authedUserID], guestAnalyses...)
+	delete(r.byUser, guestUserID)
+	return len(guestAnalyses), nil
+}
