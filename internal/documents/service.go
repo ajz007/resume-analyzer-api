@@ -14,8 +14,9 @@ import (
 
 // Service contains business logic for documents.
 type Service struct {
-	Store object.ObjectStore
-	Repo  DocumentsRepo
+	Store           object.ObjectStore
+	Repo            DocumentsRepo
+	StorageProvider string
 }
 
 // Upload saves the file to object storage and records the document.
@@ -29,17 +30,51 @@ func (s *Service) Upload(ctx context.Context, userId, fileName string, r io.Read
 		return Document{}, err
 	}
 
+	storageProvider := s.StorageProvider
+	if storageProvider == "" {
+		storageProvider = "local"
+	}
+
 	doc := Document{
-		ID:         uuid.NewString(),
-		UserID:     userId,
-		FileName:   fileName,
-		MimeType:   mimeType,
-		SizeBytes:  size,
-		StorageKey: storageKey,
-		CreatedAt:  time.Now().UTC(),
+		ID:               uuid.NewString(),
+		UserID:           userId,
+		FileName:         fileName,
+		OriginalFilename: fileName,
+		MimeType:         mimeType,
+		ContentType:      mimeType,
+		SizeBytes:        size,
+		StorageProvider:  storageProvider,
+		StorageKey:       storageKey,
+		CreatedAt:        time.Now().UTC(),
 	}
 
 	log.Printf("Uploaded document %s for user %s: size=%d mime=%s", doc.ID, userId, size, mimeType)
+
+	if err := s.Repo.Create(ctx, doc); err != nil {
+		return Document{}, err
+	}
+
+	return doc, nil
+}
+
+// CreateFromS3 records a document that already exists in S3.
+func (s *Service) CreateFromS3(ctx context.Context, userId, s3Key, originalFileName, contentType string, sizeBytes int64) (Document, error) {
+	if userId == "" || s3Key == "" || originalFileName == "" || contentType == "" || sizeBytes <= 0 {
+		return Document{}, ErrInvalidInput
+	}
+
+	doc := Document{
+		ID:               uuid.NewString(),
+		UserID:           userId,
+		FileName:         originalFileName,
+		OriginalFilename: originalFileName,
+		MimeType:         contentType,
+		ContentType:      contentType,
+		SizeBytes:        sizeBytes,
+		StorageProvider:  "s3",
+		StorageKey:       s3Key,
+		CreatedAt:        time.Now().UTC(),
+	}
 
 	if err := s.Repo.Create(ctx, doc); err != nil {
 		return Document{}, err

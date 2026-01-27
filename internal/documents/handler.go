@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,6 +27,7 @@ func NewHandler(svc *Service) *Handler {
 // RegisterRoutes attaches document routes to the router group.
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/documents", h.upload)
+	rg.POST("/documents/from-s3", h.createFromS3)
 	rg.GET("/documents/current", h.current)
 	rg.GET("/documents", h.list)
 }
@@ -54,6 +56,57 @@ func (h *Handler) upload(c *gin.Context) {
 			respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
 		default:
 			respond.Error(c, http.StatusInternalServerError, "failed to upload document", err.Error(), nil)
+		}
+		return
+	}
+
+	respond.JSON(c, http.StatusCreated, toResponse(doc))
+}
+
+type createFromS3Request struct {
+	S3Key            string `json:"s3Key"`
+	OriginalFileName string `json:"originalFileName"`
+	ContentType      string `json:"contentType"`
+	SizeBytes        int64  `json:"sizeBytes"`
+}
+
+func (h *Handler) createFromS3(c *gin.Context) {
+	userID := middleware.UserIDFromContext(c)
+
+	var req createFromS3Request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid request body", nil)
+		return
+	}
+
+	req.S3Key = strings.TrimSpace(req.S3Key)
+	req.OriginalFileName = strings.TrimSpace(req.OriginalFileName)
+	req.ContentType = strings.TrimSpace(req.ContentType)
+
+	if req.S3Key == "" {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "s3Key is required", nil)
+		return
+	}
+	if req.OriginalFileName == "" {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "originalFileName is required", nil)
+		return
+	}
+	if req.ContentType == "" {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "contentType is required", nil)
+		return
+	}
+	if req.SizeBytes <= 0 {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "sizeBytes must be positive", nil)
+		return
+	}
+
+	doc, err := h.Svc.CreateFromS3(c.Request.Context(), userID, req.S3Key, req.OriginalFileName, req.ContentType, req.SizeBytes)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
+		default:
+			respond.Error(c, http.StatusInternalServerError, "failed to create document", err.Error(), nil)
 		}
 		return
 	}
