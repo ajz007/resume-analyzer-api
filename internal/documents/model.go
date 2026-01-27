@@ -7,8 +7,11 @@ type Document struct {
 	ID               string
 	UserID           string
 	FileName         string
+	OriginalFilename string
 	MimeType         string
+	ContentType      string
 	SizeBytes        int64
+	StorageProvider  string
 	StorageKey       string
 	ExtractedTextKey string
 	ExtractedAt      *time.Time

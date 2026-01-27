@@ -168,6 +168,17 @@ func normalizeAnalysisVersion(version string) string {
 	return strings.TrimSpace(version)
 }
 
+func normalizeStorageProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "s3":
+		return "s3"
+	case "db", "local":
+		return "local"
+	default:
+		return "local"
+	}
+}
+
 func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -211,24 +222,77 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document lookup id=%s: %w", analysis.DocumentID, err), &startedAt)
 		return
 	}
+	storageProvider := normalizeStorageProvider(doc.StorageProvider)
+	telemetry.Info("analysis.document.storage", map[string]any{
+		"request_id":       requestID,
+		"document_id":      doc.ID,
+		"storage_provider": storageProvider,
+	})
 
 	extractedKey := doc.ExtractedTextKey
+	var extracted string
 	if extractedKey == "" {
-		if _, err := extract.ExtractText(ctx, s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err), &startedAt)
-			return
-		}
-		extractedKey = doc.StorageKey + ".extracted.txt"
-		if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err), &startedAt)
-			return
+		switch storageProvider {
+		case "s3":
+			s3Client, err := newS3DocClient(ctx)
+			if err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: s3 client: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			raw, err := s3Client.GetObjectBytes(ctx, doc.StorageKey)
+			if err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: s3 read: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			extracted, err = extract.ExtractTextFromBytes(ctx, raw, doc.MimeType, doc.FileName)
+			if err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			extractedKey = doc.StorageKey + ".extracted.txt"
+			if err := s3Client.PutText(ctx, extractedKey, extracted); err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: store extracted: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+		default:
+			if _, err := extract.ExtractText(ctx, s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			extractedKey = doc.StorageKey + ".extracted.txt"
+			if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
 		}
 	}
 
-	extracted, err := loadText(ctx, s.Store, extractedKey)
-	if err != nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err), &startedAt)
-		return
+	if extracted == "" {
+		switch storageProvider {
+		case "s3":
+			s3Client, err := newS3DocClient(ctx)
+			if err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: s3 client: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			raw, err := s3Client.GetObjectBytes(ctx, extractedKey)
+			if err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+			extracted = string(raw)
+		default:
+			var err error
+			extracted, err = loadText(ctx, s.Store, extractedKey)
+			if err != nil {
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err), &startedAt)
+				return
+			}
+		}
 	}
 
 	input := llm.AnalyzeInput{
