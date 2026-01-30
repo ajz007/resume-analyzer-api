@@ -27,6 +27,7 @@ import (
 	"resume-backend/internal/shared/storage/object"
 	localstore "resume-backend/internal/shared/storage/object/local"
 	s3store "resume-backend/internal/shared/storage/object/s3"
+	"resume-backend/internal/uploads"
 	"resume-backend/internal/usage"
 	"resume-backend/internal/users"
 )
@@ -89,7 +90,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	} else {
 		docRepo = documents.NewMemoryRepo()
 	}
-	docSvc := &documents.Service{Store: store, Repo: docRepo}
+	docSvc := &documents.Service{Store: store, Repo: docRepo, StorageProvider: cfg.ObjectStoreType}
 	docHandler := documents.NewHandler(docSvc)
 	var usageSvc *usage.Service
 	if sqlDB != nil {
@@ -168,6 +169,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		respond.JSON(c, http.StatusOK, gin.H{"ok": true})
 	})
 	googleAuthSvc.RegisterRoutes(api)
+	uploads.RegisterRoutes(api)
 	docHandler.RegisterRoutes(api)
 	accountHandler.RegisterRoutes(api)
 	analysisHandler.RegisterRoutes(api)
