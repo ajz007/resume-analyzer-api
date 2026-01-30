@@ -17,6 +17,7 @@ import (
 
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
+	"resume-backend/internal/shared/telemetry"
 	"resume-backend/internal/shared/util"
 )
 
@@ -72,6 +73,7 @@ func NewHandlerFromEnv(ctx context.Context) (*Handler, error) {
 type presignRequest struct {
 	FileName    string `json:"fileName"`
 	ContentType string `json:"contentType"`
+	MimeType    string `json:"mimeType"`
 	SizeBytes   int64  `json:"sizeBytes"`
 }
 
@@ -142,6 +144,14 @@ func presign(c *gin.Context) {
 		opts.Expires = expires
 	})
 	if err != nil {
+		telemetry.Error("uploads.presign.failed", map[string]any{
+			"err":         err.Error(),
+			"bucket":      handler.bucket,
+			"key":         key,
+			"contentType": req.ContentType,
+			"sizeBytes":   req.SizeBytes,
+			"request_id":  c.GetString("requestId"),
+		})
 		respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to generate upload url", nil)
 		return
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-const maxS3DocBytes = 5 << 20
+const maxS3DocBytes int64 = 5 << 20
 
 type s3DocClient struct {
 	client *s3.Client
@@ -53,8 +53,8 @@ func (c *s3DocClient) GetObjectBytes(ctx context.Context, key string) ([]byte, e
 	}
 	defer out.Body.Close()
 
-	if out.ContentLength != 0 && out.ContentLength > maxS3DocBytes {
-		return nil, fmt.Errorf("s3 object too large: %d bytes", out.ContentLength)
+	if out.ContentLength != nil && *out.ContentLength > maxS3DocBytes {
+		return nil, fmt.Errorf("s3 object too large: %d bytes", *out.ContentLength)
 	}
 
 	limited := io.LimitReader(out.Body, maxS3DocBytes+1)
