@@ -23,7 +23,7 @@ func TestDocumentsUploadAndCurrent(t *testing.T) {
 		LocalStoreDir:   t.TempDir(),
 	}
 
-	router := server.NewRouter(cfg)
+	router := server.NewRouter(cfg, nil)
 
 	// Upload a small file.
 	body := &bytes.Buffer{}

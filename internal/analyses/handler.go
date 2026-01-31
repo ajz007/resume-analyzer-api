@@ -109,6 +109,8 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrRetryRequired):
 			respond.Error(c, http.StatusConflict, "retry_required", "analysis failed; set retry=true or X-Retry-Analysis: true to retry", nil)
+		case errors.Is(err, ErrJobQueueNotConfigured):
+			respond.Error(c, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		case errors.Is(err, usage.ErrLimitReached):
 			respond.Error(c, http.StatusTooManyRequests, "limit_reached", "You've reached your analysis limit. Upgrade your plan to continue.", []map[string]string{
 				{"field": "usage", "issue": "limit_reached"},

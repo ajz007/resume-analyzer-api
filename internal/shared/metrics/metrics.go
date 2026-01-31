@@ -16,6 +16,10 @@ var (
 	analysisStartedTotal   atomic.Uint64
 	analysisCompletedTotal atomic.Uint64
 	analysisFailedTotal    atomic.Uint64
+	analysisJobsReceivedTotal            atomic.Uint64
+	analysisJobsCompletedTotal           atomic.Uint64
+	analysisJobsFailedTotal              atomic.Uint64
+	analysisJobsDeletedUnrecoverableTotal atomic.Uint64
 
 	analysisDuration = newHistogram([]float64{100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000})
 )
@@ -33,6 +37,26 @@ func IncAnalysisCompleted() {
 // IncAnalysisFailed increments the failed counter.
 func IncAnalysisFailed() {
 	analysisFailedTotal.Add(1)
+}
+
+// IncAnalysisJobsReceived increments the received jobs counter.
+func IncAnalysisJobsReceived() {
+	analysisJobsReceivedTotal.Add(1)
+}
+
+// IncAnalysisJobsCompleted increments the completed jobs counter.
+func IncAnalysisJobsCompleted() {
+	analysisJobsCompletedTotal.Add(1)
+}
+
+// IncAnalysisJobsFailed increments the failed jobs counter.
+func IncAnalysisJobsFailed() {
+	analysisJobsFailedTotal.Add(1)
+}
+
+// IncAnalysisJobsDeletedUnrecoverable increments unrecoverable jobs counter.
+func IncAnalysisJobsDeletedUnrecoverable() {
+	analysisJobsDeletedUnrecoverableTotal.Add(1)
 }
 
 // ObserveAnalysisDurationMs records an analysis duration in milliseconds.
@@ -57,6 +81,10 @@ func Render() string {
 	writeCounter(&buf, "analysis_started_total", "Total analyses started", analysisStartedTotal.Load())
 	writeCounter(&buf, "analysis_completed_total", "Total analyses completed", analysisCompletedTotal.Load())
 	writeCounter(&buf, "analysis_failed_total", "Total analyses failed", analysisFailedTotal.Load())
+	writeCounter(&buf, "analysis_jobs_received_total", "Total analysis jobs received", analysisJobsReceivedTotal.Load())
+	writeCounter(&buf, "analysis_jobs_completed_total", "Total analysis jobs completed", analysisJobsCompletedTotal.Load())
+	writeCounter(&buf, "analysis_jobs_failed_total", "Total analysis jobs failed", analysisJobsFailedTotal.Load())
+	writeCounter(&buf, "analysis_jobs_deleted_unrecoverable_total", "Total analysis jobs deleted due to unrecoverable payloads", analysisJobsDeletedUnrecoverableTotal.Load())
 	writeHistogram(&buf, "analysis_duration_ms", "Analysis duration in milliseconds", analysisDuration.Snapshot())
 	return buf.String()
 }

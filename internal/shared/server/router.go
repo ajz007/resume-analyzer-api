@@ -19,6 +19,7 @@ import (
 	"resume-backend/internal/generatedresumes"
 	"resume-backend/internal/llm"
 	openai "resume-backend/internal/llm/openai"
+	"resume-backend/internal/queue"
 	"resume-backend/internal/shared/config"
 	"resume-backend/internal/shared/metrics"
 	"resume-backend/internal/shared/server/middleware"
@@ -33,7 +34,7 @@ import (
 )
 
 // NewRouter constructs the Gin engine with middleware and routes registered.
-func NewRouter(cfg config.Config) *gin.Engine {
+func NewRouter(cfg config.Config, jobQueue queue.Client) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 
@@ -133,6 +134,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		DocRepo:         docRepo,
 		Store:           store,
 		LLM:             llmClient,
+		JobQueue:        jobQueue,
 		Provider:        cfg.LLMProvider,
 		Model:           cfg.LLMModel,
 		AnalysisVersion: cfg.AnalysisVersion,

@@ -15,6 +15,7 @@ import (
 	"resume-backend/internal/documents"
 	"resume-backend/internal/extract"
 	"resume-backend/internal/llm"
+	"resume-backend/internal/queue"
 	"resume-backend/internal/shared/metrics"
 	"resume-backend/internal/shared/storage/object"
 	"resume-backend/internal/shared/telemetry"
@@ -35,6 +36,7 @@ type Service struct {
 	DocRepo         documents.DocumentsRepo
 	Store           object.ObjectStore
 	LLM             llm.Client
+	JobQueue        queue.Client
 	Provider        string
 	Model           string
 	AnalysisVersion string
@@ -82,7 +84,17 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		}
 	}
 
-	go s.completeAsync(backgroundWithRequestID(ctx), analysis.ID)
+	if s.JobQueue == nil {
+		return Analysis{}, ErrJobQueueNotConfigured
+	}
+	if err := s.JobQueue.Send(ctx, queue.Message{
+		AnalysisID: analysis.ID,
+		RequestID:  requestIDFromContext(ctx),
+		EnqueuedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Version:    1,
+	}); err != nil {
+		return Analysis{}, err
+	}
 
 	return analysis, nil
 }
@@ -133,7 +145,17 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 		}
 	}
 	if created {
-		go s.completeAsync(backgroundWithRequestID(ctx), createdAnalysis.ID)
+		if s.JobQueue == nil {
+			return createdAnalysis, created, ErrJobQueueNotConfigured
+		}
+		if err := s.JobQueue.Send(ctx, queue.Message{
+			AnalysisID: createdAnalysis.ID,
+			RequestID:  requestIDFromContext(ctx),
+			EnqueuedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Version:    1,
+		}); err != nil {
+			return createdAnalysis, created, err
+		}
 	}
 	return createdAnalysis, created, nil
 }
@@ -179,24 +201,33 @@ func normalizeStorageProvider(provider string) string {
 	}
 }
 
-func (s *Service) completeAsync(ctx context.Context, analysisID string) {
+// ProcessAnalysis executes analysis processing synchronously.
+func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.failAnalysis(ctx, analysisID, "", "", fmt.Errorf("panic: %v", r), nil)
+			err = fmt.Errorf("panic: %v", r)
+			s.failAnalysis(ctx, analysisID, "", "", err, nil)
 		}
 	}()
-	startedAt := time.Now().UTC()
-	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusProcessing, nil, nil, nil, nil, &startedAt, nil); err != nil {
-		// THIS is the bug you’re currently hiding
-		s.failAnalysis(ctx, analysisID, "", "", fmt.Errorf("set processing failed: %w", err), &startedAt)
-		return
-	}
 
 	analysis, err := s.Repo.GetByID(ctx, analysisID)
 	if err != nil {
-		s.failAnalysis(ctx, analysisID, "", "", fmt.Errorf("analysis lookup: %w", err), &startedAt)
-		return
+		err = fmt.Errorf("analysis lookup: %w", err)
+		s.failAnalysis(ctx, analysisID, "", "", err, nil)
+		return err
 	}
+	if analysis.Status == StatusCompleted || analysis.Status == StatusFailed {
+		return nil
+	}
+
+	startedAt := time.Now().UTC()
+	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusProcessing, nil, nil, nil, nil, &startedAt, nil); err != nil {
+		// THIS is the bug you're currently hiding
+		err = fmt.Errorf("set processing failed: %w", err)
+		s.failAnalysis(ctx, analysisID, "", "", err, &startedAt)
+		return err
+	}
+
 	metrics.IncAnalysisStarted()
 	telemetry.Info("analysis.status", map[string]any{
 		"request_id":        requestIDFromContext(ctx),
@@ -207,20 +238,23 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 		"status_transition": "queued->processing",
 	})
 	if s.DocRepo == nil || s.Store == nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, errors.New("missing document store dependencies"), &startedAt)
-		return
+		err = errors.New("missing document store dependencies")
+		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+		return err
 	}
 	if s.LLM == nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, errors.New("missing llm client"), &startedAt)
-		return
+		err = errors.New("missing llm client")
+		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+		return err
 	}
 	requestID := requestIDFromContext(ctx)
 	llmClient := newRetryingLLM(s.LLM, analysisID, requestID)
 
 	doc, err := s.DocRepo.GetByID(ctx, analysis.UserID, analysis.DocumentID)
 	if err != nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document lookup id=%s: %w", analysis.DocumentID, err), &startedAt)
-		return
+		err = fmt.Errorf("document lookup id=%s: %w", analysis.DocumentID, err)
+		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+		return err
 	}
 	storageProvider := normalizeStorageProvider(doc.StorageProvider)
 	telemetry.Info("analysis.document.storage", map[string]any{
@@ -236,37 +270,44 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 		case "s3":
 			s3Client, err := newS3DocClient(ctx)
 			if err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: s3 client: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: s3 client: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			raw, err := s3Client.GetObjectBytes(ctx, doc.StorageKey)
 			if err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: s3 read: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: s3 read: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			extracted, err = extract.ExtractTextFromBytes(ctx, raw, doc.MimeType, doc.FileName)
 			if err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			extractedKey = doc.StorageKey + ".extracted.txt"
 			if err := s3Client.PutText(ctx, extractedKey, extracted); err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: store extracted: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: store extracted: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 		default:
 			if _, err := extract.ExtractText(ctx, s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			extractedKey = doc.StorageKey + ".extracted.txt"
 			if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 		}
 	}
@@ -276,21 +317,24 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 		case "s3":
 			s3Client, err := newS3DocClient(ctx)
 			if err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: s3 client: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: s3 client: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			raw, err := s3Client.GetObjectBytes(ctx, extractedKey)
 			if err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			extracted = string(raw)
 		default:
 			var err error
 			extracted, err = loadText(ctx, s.Store, extractedKey)
 			if err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err), &startedAt)
-				return
+				err = fmt.Errorf("document %s mime %s: load extracted text: %w", doc.ID, doc.MimeType, err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 		}
 	}
@@ -306,69 +350,77 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 
 	var raw json.RawMessage
 	if analysis.PromptVersion == "v2" {
-		var err error
 		raw, err = ValidateV2WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm validate v2: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("llm validate v2: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis raw failed: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("set analysis raw failed: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 	} else if analysis.PromptVersion == "v2_2" {
-		var err error
 		raw, err = ValidateV2_2WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm validate v2_2: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("llm validate v2_2: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis raw failed: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("set analysis raw failed: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 	} else if analysis.PromptVersion == "v2_3" {
-		var err error
 		raw, err = ValidateV2_3WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm validate v2_3: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("llm validate v2_3: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis raw failed: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("set analysis raw failed: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 	} else {
-		var err error
 		raw, err = llmClient.AnalyzeResume(ctxWithHash, input)
 		if err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm analyze: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("llm analyze: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
-			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis raw failed: %w", err), &startedAt)
-			return
+			err = fmt.Errorf("set analysis raw failed: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
 		}
 
 		var parsed AnalysisResultV1
 		if err := json.Unmarshal(raw, &parsed); err != nil {
 			rawRetry, retryErr := llmClient.AnalyzeResume(llm.WithFixJSON(ctxWithHash, string(raw)), input)
 			if retryErr != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm analyze retry: %w", retryErr), &startedAt)
-				return
+				err = fmt.Errorf("llm analyze retry: %w", retryErr)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			if err := json.Unmarshal(rawRetry, &parsed); err != nil {
 				if storeErr := s.storeAnalysisRaw(ctx, analysisID, rawRetry); storeErr != nil {
-					s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis raw failed: %w", storeErr), &startedAt)
-					return
+					err = fmt.Errorf("set analysis raw failed: %w", storeErr)
+					s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+					return err
 				}
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm output invalid: %w", err), &startedAt)
-				return
+				err = fmt.Errorf("llm output invalid: %w", err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 			raw = rawRetry
 			if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
-				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis raw failed: %w", err), &startedAt)
-				return
+				err = fmt.Errorf("set analysis raw failed: %w", err)
+				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+				return err
 			}
 		}
 	}
@@ -377,20 +429,23 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 		promptHash = ""
 	}
 	if err := s.Repo.UpdatePromptMetadata(ctx, analysisID, analysis.AnalysisVersion, promptHash); err != nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set prompt metadata failed: %w", err), &startedAt)
-		return
+		err = fmt.Errorf("set prompt metadata failed: %w", err)
+		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+		return err
 	}
 
 	result, err := normalizeAnalysisResult(raw, analysis)
 	if err != nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("llm output invalid: %w", err), &startedAt)
-		return
+		err = fmt.Errorf("llm output invalid: %w", err)
+		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+		return err
 	}
 
 	completedAt := time.Now().UTC()
 	if err := s.Repo.UpdateAnalysisResult(ctx, analysisID, result, &completedAt); err != nil {
-		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, fmt.Errorf("set analysis result failed: %w", err), &startedAt)
-		return
+		err = fmt.Errorf("set analysis result failed: %w", err)
+		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+		return err
 	}
 	metrics.IncAnalysisCompleted()
 	metrics.ObserveAnalysisDurationMs(durationMs(&startedAt, &completedAt))
@@ -403,6 +458,11 @@ func (s *Service) completeAsync(ctx context.Context, analysisID string) {
 		"status_transition": "processing->completed",
 		"duration_ms":       durationMs(&startedAt, &completedAt),
 	})
+	return nil
+}
+
+func (s *Service) completeAsync(ctx context.Context, analysisID string) {
+	_ = s.ProcessAnalysis(ctx, analysisID)
 }
 
 func (s *Service) failAnalysis(ctx context.Context, analysisID, userID, documentID string, err error, startedAt *time.Time) {
