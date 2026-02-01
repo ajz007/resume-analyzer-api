@@ -3,8 +3,9 @@ package analyses
 import "errors"
 
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrRetryRequired = errors.New("retry required")
+	ErrNotFound              = errors.New("not found")
+	ErrRetryRequired         = errors.New("retry required")
+	ErrJobQueueNotConfigured = errors.New("job queue not configured")
 )
 
 const (

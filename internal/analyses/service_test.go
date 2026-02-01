@@ -337,3 +337,59 @@ func TestFailureCodeStorageError(t *testing.T) {
 		t.Fatalf("expected retryable true for storage error")
 	}
 }
+
+func TestProcessAnalysisSkipsCompleted(t *testing.T) {
+	repo := NewMemoryRepo()
+	svc := &Service{Repo: repo}
+	now := time.Now().UTC()
+	analysis := Analysis{
+		ID:          "analysis-completed",
+		UserID:      "user-1",
+		DocumentID:  "doc-1",
+		Status:      StatusCompleted,
+		CompletedAt: &now,
+	}
+	if err := repo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	if err := svc.ProcessAnalysis(context.Background(), analysis.ID); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	got, err := repo.GetByID(context.Background(), analysis.ID)
+	if err != nil {
+		t.Fatalf("get analysis: %v", err)
+	}
+	if got.Status != StatusCompleted {
+		t.Fatalf("expected status completed, got %s", got.Status)
+	}
+}
+
+func TestProcessAnalysisSkipsFailed(t *testing.T) {
+	repo := NewMemoryRepo()
+	svc := &Service{Repo: repo}
+	now := time.Now().UTC()
+	analysis := Analysis{
+		ID:          "analysis-failed",
+		UserID:      "user-1",
+		DocumentID:  "doc-1",
+		Status:      StatusFailed,
+		CompletedAt: &now,
+	}
+	if err := repo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	if err := svc.ProcessAnalysis(context.Background(), analysis.ID); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	got, err := repo.GetByID(context.Background(), analysis.ID)
+	if err != nil {
+		t.Fatalf("get analysis: %v", err)
+	}
+	if got.Status != StatusFailed {
+		t.Fatalf("expected status failed, got %s", got.Status)
+	}
+}

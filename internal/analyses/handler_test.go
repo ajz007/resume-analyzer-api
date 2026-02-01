@@ -14,6 +14,7 @@ import (
 
 	"resume-backend/internal/documents"
 	"resume-backend/internal/llm"
+	"resume-backend/internal/queue"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/storage/object"
 	local "resume-backend/internal/shared/storage/object/local"
@@ -22,7 +23,7 @@ import (
 func TestStartAnalysisDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo, store := setupAnalysisRouter(t)
+	router, docRepo, analysisRepo, store, queueStub := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
@@ -64,12 +65,15 @@ func TestStartAnalysisDefaults(t *testing.T) {
 	if analysis.PromptVersion != "v2_3" {
 		t.Fatalf("expected promptVersion v2_3, got %q", analysis.PromptVersion)
 	}
+	if len(queueStub.messages) != 1 {
+		t.Fatalf("expected 1 queued message, got %d", len(queueStub.messages))
+	}
 }
 
 func TestStartAnalysisWithBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo, store := setupAnalysisRouter(t)
+	router, docRepo, analysisRepo, store, _ := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
@@ -118,7 +122,7 @@ func TestStartAnalysisWithBody(t *testing.T) {
 func TestStartAnalysisRejectsLongJobDescription(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, _, store := setupAnalysisRouter(t)
+	router, docRepo, _, store, _ := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
@@ -145,7 +149,7 @@ func TestStartAnalysisRejectsLongJobDescription(t *testing.T) {
 func TestStartAnalysisIdempotentDoublePostSingleJob(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo, store := setupAnalysisRouter(t)
+	router, docRepo, analysisRepo, store, _ := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
@@ -211,7 +215,7 @@ func TestStartAnalysisIdempotentDoublePostSingleJob(t *testing.T) {
 func TestStartAnalysisCompletedReturnsResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo, store := setupAnalysisRouter(t)
+	router, docRepo, analysisRepo, store, _ := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
@@ -281,7 +285,7 @@ func TestStartAnalysisCompletedReturnsResult(t *testing.T) {
 func TestStartAnalysisFailedRequiresRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	router, docRepo, analysisRepo, store := setupAnalysisRouter(t)
+	router, docRepo, analysisRepo, store, _ := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
 	documentID := seedDocument(t, docRepo, store, userID)
 
@@ -383,13 +387,28 @@ func (stubLLM) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.
 }`), nil
 }
 
-func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *MemoryRepo, object.ObjectStore) {
+type stubQueue struct {
+	messages []queue.Message
+	err      error
+}
+
+func (s *stubQueue) Send(ctx context.Context, msg queue.Message) error {
+	_ = ctx
+	if s.err != nil {
+		return s.err
+	}
+	s.messages = append(s.messages, msg)
+	return nil
+}
+
+func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *MemoryRepo, object.ObjectStore, *stubQueue) {
 	t.Helper()
 	docRepo := documents.NewMemoryRepo()
 	analysisRepo := NewMemoryRepo()
 	storeDir := t.TempDir()
 	store := local.New(storeDir)
-	svc := &Service{Repo: analysisRepo, DocRepo: docRepo, Store: store, LLM: stubLLM{}}
+	queueStub := &stubQueue{}
+	svc := &Service{Repo: analysisRepo, DocRepo: docRepo, Store: store, LLM: stubLLM{}, JobQueue: queueStub}
 	handler := NewHandler(svc, docRepo)
 
 	router := gin.New()
@@ -397,7 +416,7 @@ func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *Mem
 	api := router.Group("/api/v1")
 	handler.RegisterRoutes(api)
 
-	return router, docRepo, analysisRepo, store
+	return router, docRepo, analysisRepo, store, queueStub
 }
 
 func seedDocument(t *testing.T, repo *documents.MemoryRepo, store object.ObjectStore, userID string) string {

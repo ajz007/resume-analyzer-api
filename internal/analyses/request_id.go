@@ -11,6 +11,11 @@ func withRequestID(ctx context.Context, requestID string) context.Context {
 	return context.WithValue(ctx, requestIDKey{}, requestID)
 }
 
+// WithRequestID attaches a request ID to the context for logging.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return withRequestID(ctx, requestID)
+}
+
 func requestIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""

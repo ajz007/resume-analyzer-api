@@ -33,9 +33,12 @@ func TestAnalysisResultPassthroughV2_1(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fixture := loadFixture(t, "testdata/v1_good.json")
-	router, analysisRepo := setupAnalysisRouterWithLLM(t, fixture)
+	router, analysisRepo, svc := setupAnalysisRouterWithLLM(t, fixture)
 
 	analysisID := startAnalysis(t, router, "v1")
+	if err := svc.ProcessAnalysis(context.Background(), analysisID); err != nil {
+		t.Fatalf("process analysis: %v", err)
+	}
 	waitForStatus(t, analysisRepo, analysisID, StatusCompleted)
 
 	resp := getAnalysis(t, router, analysisID)
@@ -71,9 +74,12 @@ func TestAnalysisSortsSetLikeLists(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fixture := loadFixture(t, "testdata/v1_shuffled.json")
-	router, analysisRepo := setupAnalysisRouterWithLLM(t, fixture)
+	router, analysisRepo, svc := setupAnalysisRouterWithLLM(t, fixture)
 
 	analysisID := startAnalysis(t, router, "v1")
+	if err := svc.ProcessAnalysis(context.Background(), analysisID); err != nil {
+		t.Fatalf("process analysis: %v", err)
+	}
 	waitForStatus(t, analysisRepo, analysisID, StatusCompleted)
 
 	resp := getAnalysis(t, router, analysisID)
@@ -108,7 +114,7 @@ type analysisResponse struct {
 	Result map[string]any `json:"result"`
 }
 
-func setupAnalysisRouterWithLLM(t *testing.T, fixture []byte) (*gin.Engine, *MemoryRepo) {
+func setupAnalysisRouterWithLLM(t *testing.T, fixture []byte) (*gin.Engine, *MemoryRepo, *Service) {
 	t.Helper()
 	docRepo := documents.NewMemoryRepo()
 	analysisRepo := NewMemoryRepo()
@@ -135,10 +141,11 @@ func setupAnalysisRouterWithLLM(t *testing.T, fixture []byte) (*gin.Engine, *Mem
 	}
 
 	svc := &Service{
-		Repo:    analysisRepo,
-		DocRepo: docRepo,
-		Store:   store,
-		LLM:     staticLLM{response: fixture},
+		Repo:     analysisRepo,
+		DocRepo:  docRepo,
+		Store:    store,
+		LLM:      staticLLM{response: fixture},
+		JobQueue: &stubQueue{},
 	}
 	handler := NewHandler(svc, docRepo)
 
@@ -147,7 +154,7 @@ func setupAnalysisRouterWithLLM(t *testing.T, fixture []byte) (*gin.Engine, *Mem
 	api := router.Group("/api/v1")
 	handler.RegisterRoutes(api)
 
-	return router, analysisRepo
+	return router, analysisRepo, svc
 }
 
 func startAnalysis(t *testing.T, router *gin.Engine, promptVersion string) string {
