@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"resume-backend/internal/bootstrap"
 	"resume-backend/internal/shared/config"
-	"resume-backend/internal/shared/server"
 )
 
 func TestDocumentsUploadAndCurrent(t *testing.T) {
@@ -21,9 +21,15 @@ func TestDocumentsUploadAndCurrent(t *testing.T) {
 		Port:            "0",
 		CORSAllowOrigin: []string{"http://localhost:5173"},
 		LocalStoreDir:   t.TempDir(),
+		Env:             "dev",
+		ObjectStoreType: "local",
 	}
 
-	router := server.NewRouter(cfg, nil)
+	app, err := bootstrap.Build(cfg)
+	if err != nil {
+		t.Fatalf("bootstrap build: %v", err)
+	}
+	router := app.Router
 
 	// Upload a small file.
 	body := &bytes.Buffer{}

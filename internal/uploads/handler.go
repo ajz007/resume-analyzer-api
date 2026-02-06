@@ -134,12 +134,7 @@ func presign(c *gin.Context) {
 	key := path.Join(handler.prefix, userID, docID, fileID+"-"+sanitized)
 
 	expires := presignExpires
-	input := &s3.PutObjectInput{
-		Bucket:        aws.String(handler.bucket),
-		Key:           aws.String(key),
-		ContentType:   aws.String(req.ContentType),
-		ContentLength: aws.Int64(req.SizeBytes),
-	}
+	input := presignInput(handler.bucket, key)
 	out, err := handler.presign.PresignPutObject(c.Request.Context(), input, func(opts *s3.PresignOptions) {
 		opts.Expires = expires
 	})
@@ -161,6 +156,13 @@ func presign(c *gin.Context) {
 		S3Key:            key,
 		ExpiresInSeconds: int64(expires.Seconds()),
 	})
+}
+
+func presignInput(bucket, key string) *s3.PutObjectInput {
+	return &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
 }
 
 type errConfig string

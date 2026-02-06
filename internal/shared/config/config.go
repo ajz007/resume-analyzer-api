@@ -36,7 +36,7 @@ func Load() Config {
 	dbURL := os.Getenv("DATABASE_URL")
 
 	if env == "production" && dbURL == "" {
-		log.Fatal("DATABASE_URL is required in production")
+		log.Printf("DATABASE_URL is required in production")
 	}
 
 	return Config{
@@ -84,6 +84,8 @@ func normalizeEnv(raw string) string {
 		return "production"
 	case "staging":
 		return "staging"
+	case "local":
+		return "local"
 	case "development", "dev":
 		return "dev"
 	default:

@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
+	"resume-backend/internal/bootstrap"
 	"resume-backend/internal/queue"
 )
 
@@ -42,7 +43,7 @@ func (f fakeProcessor) ProcessAnalysis(ctx context.Context, analysisID string) e
 
 func TestWorkerDeletesMessageOnSuccess(t *testing.T) {
 	client := &fakeSQS{}
-	svc := fakeProcessor{}
+	app := &bootstrap.App{AnalysisProcessor: fakeProcessor{}}
 	msgBody, _ := queue.EncodeMessage(queue.Message{AnalysisID: "analysis-1", RequestID: "req-1"})
 	msg := sqstypes.Message{
 		MessageId:     aws.String("m1"),
@@ -51,7 +52,7 @@ func TestWorkerDeletesMessageOnSuccess(t *testing.T) {
 		Attributes:    map[string]string{"ApproximateReceiveCount": "1"},
 	}
 
-	handleMessage(context.Background(), client, "queue", svc, msg)
+	handleMessage(context.Background(), app, client, "queue", msg)
 
 	if len(client.deleted) != 1 {
 		t.Fatalf("expected delete, got %d", len(client.deleted))
@@ -60,7 +61,7 @@ func TestWorkerDeletesMessageOnSuccess(t *testing.T) {
 
 func TestWorkerDoesNotDeleteOnFailure(t *testing.T) {
 	client := &fakeSQS{}
-	svc := fakeProcessor{err: errors.New("boom")}
+	app := &bootstrap.App{AnalysisProcessor: fakeProcessor{err: errors.New("boom")}}
 	msgBody, _ := queue.EncodeMessage(queue.Message{AnalysisID: "analysis-2", RequestID: "req-2"})
 	msg := sqstypes.Message{
 		MessageId:     aws.String("m2"),
@@ -68,7 +69,7 @@ func TestWorkerDoesNotDeleteOnFailure(t *testing.T) {
 		Body:          aws.String(string(msgBody)),
 	}
 
-	handleMessage(context.Background(), client, "queue", svc, msg)
+	handleMessage(context.Background(), app, client, "queue", msg)
 
 	if len(client.deleted) != 0 {
 		t.Fatalf("expected no delete, got %d", len(client.deleted))
@@ -77,14 +78,14 @@ func TestWorkerDoesNotDeleteOnFailure(t *testing.T) {
 
 func TestWorkerDeletesOnInvalidJSON(t *testing.T) {
 	client := &fakeSQS{}
-	svc := fakeProcessor{}
+	app := &bootstrap.App{AnalysisProcessor: fakeProcessor{}}
 	msg := sqstypes.Message{
 		MessageId:     aws.String("m3"),
 		ReceiptHandle: aws.String("r3"),
 		Body:          aws.String("{bad-json"),
 	}
 
-	handleMessage(context.Background(), client, "queue", svc, msg)
+	handleMessage(context.Background(), app, client, "queue", msg)
 
 	if len(client.deleted) != 1 {
 		t.Fatalf("expected delete, got %d", len(client.deleted))

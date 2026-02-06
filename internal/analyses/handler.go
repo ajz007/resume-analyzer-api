@@ -89,9 +89,9 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, documents.ErrNotFound):
-			respond.Error(c, http.StatusNotFound, "not_found", "document not found", nil)
+			respond.Error(c, http.StatusNotFound, "not_found", "document not found", err)
 		default:
-			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to start analysis", nil)
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to start analysis", err)
 		}
 		return
 	}
@@ -110,13 +110,13 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		case errors.Is(err, ErrRetryRequired):
 			respond.Error(c, http.StatusConflict, "retry_required", "analysis failed; set retry=true or X-Retry-Analysis: true to retry", nil)
 		case errors.Is(err, ErrJobQueueNotConfigured):
-			respond.Error(c, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+			respond.Error(c, http.StatusInternalServerError, "internal_error", err.Error(), err)
 		case errors.Is(err, usage.ErrLimitReached):
 			respond.Error(c, http.StatusTooManyRequests, "limit_reached", "You've reached your analysis limit. Upgrade your plan to continue.", []map[string]string{
 				{"field": "usage", "issue": "limit_reached"},
 			})
 		default:
-			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to start analysis", nil)
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to start analysis", err)
 		}
 		return
 	}

@@ -20,6 +20,11 @@ const (
 // Auth validates JWTs or guest headers and stores identity in context.
 func Auth(env string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodOptions {
+			c.Status(http.StatusNoContent)
+			return
+		}
+
 		path := c.Request.URL.Path
 		if strings.HasPrefix(path, "/api/v1/auth/google/") {
 			c.Next()
