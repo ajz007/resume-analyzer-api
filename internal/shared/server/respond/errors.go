@@ -1,6 +1,9 @@
 package respond
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"resume-backend/internal/shared/telemetry"
@@ -39,6 +42,12 @@ func Error(c *gin.Context, status int, code, message string, details interface{}
 	if isGuest, ok := c.Get("isGuest"); ok {
 		fields["is_guest"] = isGuest
 	}
+	if details != nil {
+		if errStr := errorString(details); errStr != "" {
+			fields["error"] = sanitizeError(errStr)
+			fields["error_type"] = fmt.Sprintf("%T", details)
+		}
+	}
 	telemetry.Error("http.error", fields)
 
 	c.Header("Content-Type", "application/json; charset=utf-8")
@@ -49,4 +58,28 @@ func Error(c *gin.Context, status int, code, message string, details interface{}
 			Details: details,
 		},
 	})
+}
+
+func errorString(details any) string {
+	switch v := details.(type) {
+	case error:
+		return v.Error()
+	case fmt.Stringer:
+		return v.String()
+	case string:
+		return v
+	default:
+		return ""
+	}
+}
+
+func sanitizeError(msg string) string {
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.TrimSpace(msg)
+	const maxLen = 500
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	return msg
 }

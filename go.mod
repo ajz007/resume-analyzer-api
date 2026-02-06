@@ -4,10 +4,12 @@ go 1.24.1
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/aws/aws-lambda-go v1.52.0
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.1
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.21
+	github.com/awslabs/aws-lambda-go-api-proxy v0.16.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.5.0
 	github.com/jackc/pgx/v5 v5.8.0
