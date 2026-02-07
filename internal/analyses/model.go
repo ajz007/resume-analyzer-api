@@ -9,6 +9,7 @@ type Analysis struct {
 	UserID              string         `json:"userId"`
 	JobDescription      string         `json:"jobDescription"`
 	PromptVersion       string         `json:"promptVersion"`
+	Mode                AnalysisMode   `json:"mode"`
 	AnalysisVersion     string         `json:"analysisVersion"`
 	PromptHash          string         `json:"promptHash"`
 	Provider            string         `json:"provider"`

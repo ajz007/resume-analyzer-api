@@ -1,5 +1,10 @@
 # Resume Analyzer API
 
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+go build -o bootstrap ./cmd/api
+
+```
 ## Prompt Testing CLI
 
 Run a resume through extraction + LLM and validate JSON output:

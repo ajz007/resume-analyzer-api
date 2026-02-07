@@ -67,6 +67,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		UserID:          userID,
 		JobDescription:  jobDescription,
 		PromptVersion:   promptVersion,
+		Mode:            ModeJobMatch,
 		AnalysisVersion: normalizeAnalysisVersion(s.AnalysisVersion),
 		Provider:        normalizeProvider(s.Provider),
 		Model:           s.Model,
@@ -100,12 +101,15 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 }
 
 // StartOrReuse enqueues a new analysis or reuses an existing one for idempotent requests.
-func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescription, promptVersion string, allowRetry bool) (Analysis, bool, error) {
+func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescription, promptVersion string, mode AnalysisMode, allowRetry bool) (Analysis, bool, error) {
 	if documentID == "" || userID == "" {
 		return Analysis{}, false, errors.New("documentID and userID are required")
 	}
 	if promptVersion == "" {
 		promptVersion = "v2_3"
+	}
+	if mode == "" {
+		mode = ModeJobMatch
 	}
 
 	analysis := Analysis{
@@ -114,6 +118,7 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 		UserID:          userID,
 		JobDescription:  jobDescription,
 		PromptVersion:   promptVersion,
+		Mode:            mode,
 		AnalysisVersion: normalizeAnalysisVersion(s.AnalysisVersion),
 		Provider:        normalizeProvider(s.Provider),
 		Model:           s.Model,

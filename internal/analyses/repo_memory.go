@@ -60,6 +60,9 @@ func (r *MemoryRepo) GetOrCreateForDocument(ctx context.Context, analysis Analys
 		}
 	}
 
+	if analysis.Mode == "" {
+		analysis.Mode = ModeJobMatch
+	}
 	r.byID[analysis.ID] = analysis
 	r.byUser[analysis.UserID] = append(r.byUser[analysis.UserID], analysis)
 	return analysis, true, nil
@@ -72,6 +75,9 @@ func (r *MemoryRepo) Create(ctx context.Context, analysis Analysis) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if analysis.Mode == "" {
+		analysis.Mode = ModeJobMatch
+	}
 	r.byID[analysis.ID] = analysis
 	r.byUser[analysis.UserID] = append(r.byUser[analysis.UserID], analysis)
 	return nil
