@@ -42,6 +42,7 @@ func TestPGRepoCreateIncludesPromptMetadata(t *testing.T) {
 			nil,              // analysis_completed_at
 			analysis.JobDescription,
 			analysis.PromptVersion,
+			ModeJobMatch,
 			analysis.AnalysisVersion,
 			analysis.PromptHash,
 			analysis.Provider,

@@ -119,6 +119,80 @@ func TestStartAnalysisWithBody(t *testing.T) {
 	}
 }
 
+func TestStartAnalysisAllowsEmptyJobDescriptionForATS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, docRepo, analysisRepo, store, _ := setupAnalysisRouter(t)
+	userID := "guest:test-guest"
+	documentID := seedDocument(t, docRepo, store, userID)
+
+	payload := map[string]string{
+		"mode": "ATS",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+documentID+"/analyze", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addGuestHeader(req)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", resp.Code)
+	}
+
+	var created struct {
+		AnalysisID string `json:"analysisId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if created.AnalysisID == "" {
+		t.Fatalf("expected analysisId, got empty")
+	}
+
+	analysis, err := analysisRepo.GetByID(context.Background(), created.AnalysisID)
+	if err != nil {
+		t.Fatalf("get analysis: %v", err)
+	}
+	if analysis.Mode != ModeATS {
+		t.Fatalf("expected mode ATS, got %q", analysis.Mode)
+	}
+	if analysis.JobDescription != "" {
+		t.Fatalf("expected empty jobDescription, got %q", analysis.JobDescription)
+	}
+}
+
+func TestStartAnalysisRejectsShortJobDescriptionForJobMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, docRepo, _, store, _ := setupAnalysisRouter(t)
+	userID := "guest:test-guest"
+	documentID := seedDocument(t, docRepo, store, userID)
+
+	payload := map[string]string{
+		"mode":           "JOB_MATCH",
+		"jobDescription": strings.Repeat("a", 299),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+documentID+"/analyze", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addGuestHeader(req)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", resp.Code)
+	}
+}
+
 func TestStartAnalysisRejectsLongJobDescription(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

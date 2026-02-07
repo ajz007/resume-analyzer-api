@@ -24,6 +24,8 @@ type MetaV2 struct {
 	Confidence             float64  `json:"confidence"`
 	Assumptions            []string `json:"assumptions"`
 	Limitations            []string `json:"limitations"`
+	Mode                   string   `json:"mode,omitempty"`
+	PrimaryScoreType       string   `json:"primaryScoreType,omitempty"`
 }
 
 type ATSV2 struct {

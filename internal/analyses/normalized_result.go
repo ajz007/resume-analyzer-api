@@ -92,7 +92,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		}
 		out := normalizeFromV2_3(parsed, analysis)
 		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
-		applyScores(&out, extractFloat(top["matchScore"]))
+		applyScores(&out, analysis.Mode, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_2"):
 		var parsed AnalysisResultV2_2
@@ -101,7 +101,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		}
 		out := normalizeFromV2_2(parsed, analysis)
 		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
-		applyScores(&out, extractFloat(top["matchScore"]))
+		applyScores(&out, analysis.Mode, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_1"):
 		var parsed AnalysisResultV2_1
@@ -110,7 +110,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		}
 		out := normalizeFromV2_1(parsed, analysis)
 		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
-		applyScores(&out, extractFloat(top["matchScore"]))
+		applyScores(&out, analysis.Mode, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2"):
 		var parsed AnalysisResultV2
@@ -119,7 +119,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		}
 		out := normalizeFromV2(parsed, analysis)
 		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
-		applyScores(&out, extractFloat(top["matchScore"]))
+		applyScores(&out, analysis.Mode, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	default:
 		var parsed AnalysisResultV1
@@ -130,7 +130,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 		topFormatting := extractStringSlice(top["formattingIssues"])
 		out := normalizeFromV1(parsed, analysis, topMissing, topFormatting)
 		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
-		applyScores(&out, extractFloat(top["matchScore"]))
+		applyScores(&out, analysis.Mode, extractFloat(top["matchScore"]))
 		return out, validateNormalized(out)
 	}
 }
@@ -166,6 +166,8 @@ func normalizeFromV1(r AnalysisResultV1, analysis Analysis, topMissing, topForma
 		Confidence:             0,
 		Assumptions:            []string{},
 		Limitations:            []string{},
+		Mode:                   "",
+		PrimaryScoreType:       "",
 	}
 	if meta.Model == "" {
 		meta.Model = "unknown"
@@ -404,6 +406,19 @@ func normalizeMeta(meta MetaV2, analysis Analysis) MetaV2 {
 	if meta.Model == "" {
 		meta.Model = "unknown"
 	}
+	mode := analysis.Mode
+	if mode == "" {
+		mode = ModeJobMatch
+	}
+	meta.Mode = string(mode)
+	switch mode {
+	case ModeATS:
+		meta.PrimaryScoreType = string(ModeATS)
+	case ModeJobMatch:
+		meta.PrimaryScoreType = string(ModeJobMatch)
+	default:
+		meta.PrimaryScoreType = string(ModeJobMatch)
+	}
 	if meta.Assumptions == nil {
 		meta.Assumptions = []string{}
 	}
@@ -433,17 +448,37 @@ func normalizeATS(ats NormalizedATS) NormalizedATS {
 	return ats
 }
 
-func applyScores(out *NormalizedAnalysisResult, matchScore *float64) {
+func applyScores(out *NormalizedAnalysisResult, mode AnalysisMode, matchScore *float64) {
 	if out == nil {
 		return
 	}
-	out.FinalScore = clampScore(out.ATS.Score)
-	if matchScore != nil {
-		out.MatchScore = clampScore(*matchScore)
-		return
+	if mode == "" {
+		mode = ModeJobMatch
 	}
-	if out.Meta.JobDescriptionProvided {
-		out.MatchScore = calculateMatchScore(out.ATS.MissingKeywords.FromJobDescription)
+	var computedMatch *float64
+	if matchScore != nil {
+		val := clampScore(*matchScore)
+		computedMatch = &val
+	} else if out.Meta.JobDescriptionProvided {
+		val := calculateMatchScore(out.ATS.MissingKeywords.FromJobDescription)
+		computedMatch = &val
+	}
+	if computedMatch != nil {
+		out.MatchScore = *computedMatch
+	}
+
+	switch mode {
+	case ModeATS:
+		out.FinalScore = clampScore(out.ATS.Score)
+	case ModeJobMatch:
+		if computedMatch != nil {
+			out.FinalScore = *computedMatch
+		} else {
+			out.FinalScore = clampScore(out.ATS.Score)
+			out.Meta.Limitations = append(out.Meta.Limitations, "finalScore fell back to ats.score because matchScore was unavailable")
+		}
+	default:
+		out.FinalScore = clampScore(out.ATS.Score)
 	}
 }
 
