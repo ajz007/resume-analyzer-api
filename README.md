@@ -1,8 +1,8 @@
 # Resume Analyzer API
 
 ```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-go build -o bootstrap ./cmd/api
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+go build -o bootstrap ./cmd/lambda-http
 
 ```
 ## Prompt Testing CLI
