@@ -42,6 +42,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 type startAnalysisRequest struct {
 	JobDescription string `json:"jobDescription"`
 	PromptVersion  string `json:"promptVersion"`
+	Mode           string `json:"mode"`
 }
 
 const defaultPollAfterMs = 2000
@@ -61,17 +62,31 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
 		return
 	}
-	if len(strings.TrimSpace(req.JobDescription)) == 0 {
-		respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription is required", []map[string]string{
-			{"field": "jobDescription", "issue": "required"},
+	modeInput := strings.TrimSpace(req.Mode)
+	if modeInput == "" {
+		modeInput = string(ModeJobMatch)
+	}
+	mode, err := ParseMode(modeInput)
+	if err != nil {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "mode is invalid", []map[string]string{
+			{"field": "mode", "issue": "invalid"},
 		})
 		return
 	}
-	if utf8.RuneCountInString(req.JobDescription) < 300 {
-		respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription too short", []map[string]string{
-			{"field": "jobDescription", "issue": "min_length"},
-		})
-		return
+	req.Mode = string(mode)
+	if mode == ModeJobMatch {
+		if len(strings.TrimSpace(req.JobDescription)) == 0 {
+			respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription is required", []map[string]string{
+				{"field": "jobDescription", "issue": "required"},
+			})
+			return
+		}
+		if utf8.RuneCountInString(req.JobDescription) < 300 {
+			respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription too short", []map[string]string{
+				{"field": "jobDescription", "issue": "min_length"},
+			})
+			return
+		}
 	}
 	if utf8.RuneCountInString(req.JobDescription) > 50000 {
 		respond.Error(c, http.StatusBadRequest, "validation_error", "jobDescription too long", []map[string]string{
@@ -83,6 +98,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		"request_id":  middleware.RequestIDFromContext(c),
 		"user_id":     userID,
 		"document_id": documentID,
+		"mode":        mode,
 	})
 
 	doc, err := h.DocRepo.GetByID(c.Request.Context(), userID, documentID)
@@ -104,7 +120,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		allowRetry = true
 	}
 
-	analysis, created, err := h.Svc.StartOrReuse(ctx, doc.ID, userID, req.JobDescription, req.PromptVersion, allowRetry)
+	analysis, created, err := h.Svc.StartOrReuse(ctx, doc.ID, userID, req.JobDescription, req.PromptVersion, mode, allowRetry)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRetryRequired):
@@ -165,6 +181,7 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 	resp := gin.H{
 		"id":     analysis.ID,
 		"status": analysis.Status,
+		"mode":   analysis.Mode,
 	}
 	if analysis.StartedAt != nil {
 		resp["startedAt"] = analysis.StartedAt
@@ -234,6 +251,7 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 			"analysisId": a.ID,
 			"documentId": a.DocumentID,
 			"status":     a.Status,
+			"mode":       a.Mode,
 			"createdAt":  a.CreatedAt,
 		}
 		if a.StartedAt != nil {
@@ -243,7 +261,7 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 			item["completedAt"] = a.CompletedAt
 		}
 		if a.Status == StatusCompleted && a.Result != nil {
-			if finalScore, ok := extractFinalScore(a.Result); ok {
+			if finalScore, ok := extractFinalScore(a.Result, a.Mode); ok {
 				item["finalScore"] = finalScore
 			} else {
 				item["finalScore"] = nil
@@ -261,12 +279,20 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 	respond.JSON(c, http.StatusOK, resp)
 }
 
-func extractFinalScore(result map[string]any) (float64, bool) {
+func extractFinalScore(result map[string]any, mode AnalysisMode) (float64, bool) {
 	if result == nil {
 		return 0, false
 	}
 	if score, ok := extractFloatAny(result["finalScore"]); ok {
 		return score, true
+	}
+	if mode == "" {
+		mode = ModeJobMatch
+	}
+	if mode == ModeJobMatch {
+		if score, ok := extractFloatAny(result["matchScore"]); ok {
+			return score, true
+		}
 	}
 	if atsRaw, ok := result["ats"]; ok {
 		if ats, ok := atsRaw.(map[string]any); ok {

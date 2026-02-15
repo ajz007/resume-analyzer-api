@@ -1,7 +1,7 @@
 package main
 
 // Build the Lambda handler binary:
-//   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bootstrap ./cmd/lambda-http
+//   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bootstrap ./cmd/lambda-http
 
 import (
 	"context"

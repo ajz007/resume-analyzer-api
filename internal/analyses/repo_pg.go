@@ -71,9 +71,9 @@ func (r *PGRepo) Create(ctx context.Context, analysis Analysis) error {
 	const query = `
 INSERT INTO analyses (
 	id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
-	job_description, prompt_version, analysis_version, prompt_hash, provider, model, created_at
+	job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model, created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	rawPayload, err := marshalJSONB(analysis.AnalysisRaw)
 	if err != nil {
 		return err
@@ -81,6 +81,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 	resultPayload, err := marshalJSONB(analysis.Result)
 	if err != nil {
 		return err
+	}
+	mode := analysis.Mode
+	if mode == "" {
+		mode = ModeJobMatch
 	}
 	_, err = r.DB.ExecContext(ctx, query,
 		analysis.ID,
@@ -93,6 +97,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 		nil,
 		analysis.JobDescription,
 		analysis.PromptVersion,
+		mode,
 		analysis.AnalysisVersion,
 		analysis.PromptHash,
 		analysis.Provider,
@@ -120,7 +125,7 @@ WHERE user_id = $2 AND deleted_at IS NULL`
 func (r *PGRepo) GetByID(ctx context.Context, analysisID string) (Analysis, error) {
 	const query = `
 SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
-       job_description, prompt_version, analysis_version, prompt_hash, provider, model,
+       job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model,
        error_code, error_message, error_retryable, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE id = $1 AND deleted_at IS NULL
@@ -132,6 +137,7 @@ LIMIT 1`
 	var analysisCompletedAt sql.NullTime
 	var jobDescription sql.NullString
 	var promptVersion sql.NullString
+	var mode sql.NullString
 	var analysisVersion sql.NullString
 	var promptHash sql.NullString
 	var provider sql.NullString
@@ -152,6 +158,7 @@ LIMIT 1`
 		&analysisCompletedAt,
 		&jobDescription,
 		&promptVersion,
+		&mode,
 		&analysisVersion,
 		&promptHash,
 		&provider,
@@ -192,6 +199,15 @@ LIMIT 1`
 	}
 	if promptVersion.Valid {
 		a.PromptVersion = promptVersion.String
+	}
+	if mode.Valid {
+		if parsed, err := ParseMode(mode.String); err == nil {
+			a.Mode = parsed
+		} else {
+			a.Mode = ModeJobMatch
+		}
+	} else {
+		a.Mode = ModeJobMatch
 	}
 	if analysisVersion.Valid {
 		a.AnalysisVersion = analysisVersion.String
@@ -356,7 +372,7 @@ func (r *PGRepo) ListByUser(ctx context.Context, userID string, limit, offset in
 
 	const query = `
 SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
-       job_description, prompt_version, analysis_version, prompt_hash, provider, model,
+       job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model,
        error_code, error_message, error_retryable, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE user_id = $1 AND deleted_at IS NULL
@@ -378,6 +394,7 @@ LIMIT $2 OFFSET $3`
 		var analysisCompletedAt sql.NullTime
 		var jobDescription sql.NullString
 		var promptVersion sql.NullString
+		var mode sql.NullString
 		var analysisVersion sql.NullString
 		var promptHash sql.NullString
 		var provider sql.NullString
@@ -398,6 +415,7 @@ LIMIT $2 OFFSET $3`
 			&analysisCompletedAt,
 			&jobDescription,
 			&promptVersion,
+			&mode,
 			&analysisVersion,
 			&promptHash,
 			&provider,
@@ -433,6 +451,15 @@ LIMIT $2 OFFSET $3`
 		}
 		if promptVersion.Valid {
 			a.PromptVersion = promptVersion.String
+		}
+		if mode.Valid {
+			if parsed, err := ParseMode(mode.String); err == nil {
+				a.Mode = parsed
+			} else {
+				a.Mode = ModeJobMatch
+			}
+		} else {
+			a.Mode = ModeJobMatch
 		}
 		if analysisVersion.Valid {
 			a.AnalysisVersion = analysisVersion.String
@@ -482,9 +509,9 @@ func createWithTx(ctx context.Context, tx *sql.Tx, analysis Analysis) error {
 	const query = `
 INSERT INTO analyses (
 	id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
-	job_description, prompt_version, analysis_version, prompt_hash, provider, model, created_at
+	job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model, created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 
 	rawPayload, err := marshalJSONB(analysis.AnalysisRaw)
 	if err != nil {
@@ -495,6 +522,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 		return err
 	}
 
+	mode := analysis.Mode
+	if mode == "" {
+		mode = ModeJobMatch
+	}
 	_, err = tx.ExecContext(ctx, query,
 		analysis.ID,
 		analysis.DocumentID,
@@ -506,6 +537,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 		nil,
 		analysis.JobDescription,
 		analysis.PromptVersion,
+		mode,
 		analysis.AnalysisVersion,
 		analysis.PromptHash,
 		analysis.Provider,
@@ -518,7 +550,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 func getLatestForDocument(ctx context.Context, q queryer, userID, documentID string) (Analysis, error) {
 	const query = `
 SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
-       job_description, prompt_version, analysis_version, prompt_hash, provider, model,
+       job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model,
        error_code, error_message, error_retryable, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE document_id = $1 AND user_id = $2 AND deleted_at IS NULL
@@ -532,6 +564,7 @@ LIMIT 1`
 	var analysisCompletedAt sql.NullTime
 	var jobDescription sql.NullString
 	var promptVersion sql.NullString
+	var mode sql.NullString
 	var analysisVersion sql.NullString
 	var promptHash sql.NullString
 	var provider sql.NullString
@@ -553,6 +586,7 @@ LIMIT 1`
 		&analysisCompletedAt,
 		&jobDescription,
 		&promptVersion,
+		&mode,
 		&analysisVersion,
 		&promptHash,
 		&provider,
@@ -590,6 +624,15 @@ LIMIT 1`
 	}
 	if promptVersion.Valid {
 		a.PromptVersion = promptVersion.String
+	}
+	if mode.Valid {
+		if parsed, err := ParseMode(mode.String); err == nil {
+			a.Mode = parsed
+		} else {
+			a.Mode = ModeJobMatch
+		}
+	} else {
+		a.Mode = ModeJobMatch
 	}
 	if analysisVersion.Valid {
 		a.AnalysisVersion = analysisVersion.String
