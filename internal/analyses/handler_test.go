@@ -3,6 +3,7 @@ package analyses
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"resume-backend/internal/documents"
 	"resume-backend/internal/llm"
 	"resume-backend/internal/queue"
+	sharedcrypto "resume-backend/internal/shared/crypto"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/storage/object"
 	local "resume-backend/internal/shared/storage/object/local"
@@ -446,6 +448,235 @@ func TestListAnalysesIncludesFinalScore(t *testing.T) {
 	}
 }
 
+func TestCreateShareForOwnedAnalysisReturnsTokenAndURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, _, analysisRepo, _, _ := setupAnalysisRouter(t)
+	analysis := Analysis{
+		ID:         "analysis-share-create",
+		DocumentID: "doc-share-create",
+		UserID:     "guest:test-guest",
+		Status:     StatusCompleted,
+		Result: map[string]any{
+			"summary": "ok",
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analyses/"+analysis.ID+"/shares", nil)
+	addGuestHeader(req)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d", resp.Code)
+	}
+
+	var payload struct {
+		ShareID  string `json:"shareId"`
+		Token    string `json:"token"`
+		ShareURL string `json:"shareUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.ShareID == "" {
+		t.Fatalf("expected shareId")
+	}
+	if payload.Token == "" {
+		t.Fatalf("expected token")
+	}
+	if payload.ShareURL == "" || !strings.Contains(payload.ShareURL, "/app/share/"+payload.Token) {
+		t.Fatalf("expected shareUrl to include token, got %q", payload.ShareURL)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/analyses/"+analysis.ID+"/shares", nil)
+	addGuestHeader(req2)
+	resp2 := httptest.NewRecorder()
+	router.ServeHTTP(resp2, req2)
+	if resp2.Code != http.StatusCreated {
+		t.Fatalf("expected second status 201, got %d", resp2.Code)
+	}
+	var payload2 struct {
+		ShareID  string `json:"shareId"`
+		Token    string `json:"token"`
+		ShareURL string `json:"shareUrl"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	if payload2.ShareID != payload.ShareID {
+		t.Fatalf("expected same shareId %q, got %q", payload.ShareID, payload2.ShareID)
+	}
+	if payload2.Token != payload.Token {
+		t.Fatalf("expected same token %q, got %q", payload.Token, payload2.Token)
+	}
+	if payload2.ShareURL != payload.ShareURL {
+		t.Fatalf("expected same shareUrl %q, got %q", payload.ShareURL, payload2.ShareURL)
+	}
+}
+
+func TestPublicGetShareByTokenReturnsSanitizedAnalysisResult(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, _, analysisRepo, _, _ := setupAnalysisRouter(t)
+	analysis := Analysis{
+		ID:             "analysis-share-public",
+		DocumentID:     "doc-share-public",
+		UserID:         "guest:test-guest",
+		JobDescription: "private job description",
+		Status:         StatusCompleted,
+		Result: map[string]any{
+			"summary": "ok",
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/analyses/"+analysis.ID+"/shares", nil)
+	addGuestHeader(createReq)
+	createResp := httptest.NewRecorder()
+	router.ServeHTTP(createResp, createReq)
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("expected create share status 201, got %d", createResp.Code)
+	}
+	var created struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create share response: %v", err)
+	}
+	if created.Token == "" {
+		t.Fatalf("expected token")
+	}
+
+	publicReq := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+created.Token, nil)
+	publicResp := httptest.NewRecorder()
+	router.ServeHTTP(publicResp, publicReq)
+	if publicResp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", publicResp.Code)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(publicResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["id"] != analysis.ID {
+		t.Fatalf("expected id %q, got %v", analysis.ID, payload["id"])
+	}
+	if _, ok := payload["result"].(map[string]any); !ok {
+		t.Fatalf("expected result object")
+	}
+	if _, exists := payload["jobDescription"]; exists {
+		t.Fatalf("expected no jobDescription in shared response")
+	}
+	if _, exists := payload["documentId"]; exists {
+		t.Fatalf("expected no documentId in shared response")
+	}
+}
+
+func TestPublicGetRevokedShareReturns404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, _, analysisRepo, _, _ := setupAnalysisRouter(t)
+	analysis := Analysis{
+		ID:         "analysis-share-revoked",
+		DocumentID: "doc-share-revoked",
+		UserID:     "guest:test-guest",
+		Status:     StatusCompleted,
+		Result: map[string]any{
+			"summary": "ok",
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/analyses/"+analysis.ID+"/shares", nil)
+	addGuestHeader(createReq)
+	createResp := httptest.NewRecorder()
+	router.ServeHTTP(createResp, createReq)
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("expected create share status 201, got %d", createResp.Code)
+	}
+	var created struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create share response: %v", err)
+	}
+
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/v1/shares/"+created.Token, nil)
+	addGuestHeader(revokeReq)
+	revokeResp := httptest.NewRecorder()
+	router.ServeHTTP(revokeResp, revokeReq)
+	if revokeResp.Code != http.StatusNoContent {
+		t.Fatalf("expected revoke status 204, got %d", revokeResp.Code)
+	}
+
+	publicReq := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+created.Token, nil)
+	publicResp := httptest.NewRecorder()
+	router.ServeHTTP(publicResp, publicReq)
+	if publicResp.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", publicResp.Code)
+	}
+}
+
+func TestNonOwnerCannotCreateOrRevokeShare(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, _, analysisRepo, _, _ := setupAnalysisRouter(t)
+	analysis := Analysis{
+		ID:         "analysis-share-owner-check",
+		DocumentID: "doc-share-owner-check",
+		UserID:     "guest:test-guest",
+		Status:     StatusCompleted,
+		Result: map[string]any{
+			"summary": "ok",
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	ownerCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/analyses/"+analysis.ID+"/shares", nil)
+	addGuestHeader(ownerCreateReq)
+	ownerCreateResp := httptest.NewRecorder()
+	router.ServeHTTP(ownerCreateResp, ownerCreateReq)
+	if ownerCreateResp.Code != http.StatusCreated {
+		t.Fatalf("expected owner create status 201, got %d", ownerCreateResp.Code)
+	}
+	var created struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(ownerCreateResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode owner create response: %v", err)
+	}
+
+	nonOwnerCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/analyses/"+analysis.ID+"/shares", nil)
+	nonOwnerCreateReq.Header.Set("X-Guest-Id", "other-guest")
+	nonOwnerCreateResp := httptest.NewRecorder()
+	router.ServeHTTP(nonOwnerCreateResp, nonOwnerCreateReq)
+	if nonOwnerCreateResp.Code != http.StatusForbidden {
+		t.Fatalf("expected non-owner create status 403, got %d", nonOwnerCreateResp.Code)
+	}
+
+	nonOwnerRevokeReq := httptest.NewRequest(http.MethodDelete, "/api/v1/shares/"+created.Token, nil)
+	nonOwnerRevokeReq.Header.Set("X-Guest-Id", "other-guest")
+	nonOwnerRevokeResp := httptest.NewRecorder()
+	router.ServeHTTP(nonOwnerRevokeResp, nonOwnerRevokeReq)
+	if nonOwnerRevokeResp.Code != http.StatusForbidden {
+		t.Fatalf("expected non-owner revoke status 403, got %d", nonOwnerRevokeResp.Code)
+	}
+}
+
 type stubLLM struct{}
 
 func (stubLLM) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.RawMessage, error) {
@@ -481,8 +712,20 @@ func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *Mem
 	analysisRepo := NewMemoryRepo()
 	storeDir := t.TempDir()
 	store := local.New(storeDir)
+	tokenCipher, err := sharedcrypto.NewTokenCipher(base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
+	if err != nil {
+		t.Fatalf("create token cipher: %v", err)
+	}
 	queueStub := &stubQueue{}
-	svc := &Service{Repo: analysisRepo, DocRepo: docRepo, Store: store, LLM: stubLLM{}, JobQueue: queueStub}
+	svc := &Service{
+		Repo:             analysisRepo,
+		DocRepo:          docRepo,
+		Store:            store,
+		LLM:              stubLLM{},
+		JobQueue:         queueStub,
+		ShareTokenCipher: tokenCipher,
+		UIBaseURL:        "https://rethinkresume.com",
+	}
 	handler := NewHandler(svc, docRepo)
 
 	router := gin.New()

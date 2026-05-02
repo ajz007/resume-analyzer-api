@@ -50,6 +50,7 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 			Rules: map[string]middleware.RateLimitRule{
 				"DEFAULT": {Rate: 4, Burst: 8},
 				"POLLING": {Rate: 12, Burst: 24},
+				"SHARED":  {Rate: 2, Burst: 4},
 			},
 		}),
 	)
@@ -84,6 +85,8 @@ func rateLimitGroupFor(c *gin.Context) string {
 		return "DEFAULT"
 	}
 	switch c.FullPath() {
+	case "/api/v1/shares/:token":
+		return "SHARED"
 	case "/api/v1/analyses/:id",
 		"/api/v1/documents/:id",
 		"/api/v1/documents/:id/status":

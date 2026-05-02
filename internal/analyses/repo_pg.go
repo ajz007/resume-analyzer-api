@@ -242,6 +242,131 @@ LIMIT 1`
 	return a, nil
 }
 
+// GetActiveShareByAnalysisOwner returns the latest active share for an analysis/owner pair.
+func (r *PGRepo) GetActiveShareByAnalysisOwner(ctx context.Context, analysisID string, ownerUserID *string, ownerGuestID *string) (AnalysisShare, error) {
+	const query = `
+SELECT id, analysis_id, owner_user_id, owner_guest_id, token_hash, token_ciphertext, created_at, revoked_at
+FROM analysis_shares
+WHERE analysis_id = $1
+  AND owner_user_id IS NOT DISTINCT FROM $2
+  AND owner_guest_id IS NOT DISTINCT FROM $3
+  AND revoked_at IS NULL
+ORDER BY created_at DESC
+LIMIT 1`
+
+	var share AnalysisShare
+	var ownerUser sql.NullString
+	var ownerGuest sql.NullString
+	var revokedAt sql.NullTime
+	err := r.DB.QueryRowContext(ctx, query, analysisID, ownerUserID, ownerGuestID).Scan(
+		&share.ID,
+		&share.AnalysisID,
+		&ownerUser,
+		&ownerGuest,
+		&share.TokenHash,
+		&share.TokenCipher,
+		&share.CreatedAt,
+		&revokedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AnalysisShare{}, ErrShareNotFound
+		}
+		return AnalysisShare{}, err
+	}
+	if ownerUser.Valid {
+		share.OwnerUserID = &ownerUser.String
+	}
+	if ownerGuest.Valid {
+		share.OwnerGuestID = &ownerGuest.String
+	}
+	if revokedAt.Valid {
+		share.RevokedAt = &revokedAt.Time
+	}
+	return share, nil
+}
+
+// GetShareByTokenHash returns a share by token hash.
+func (r *PGRepo) GetShareByTokenHash(ctx context.Context, tokenHash string) (AnalysisShare, error) {
+	const query = `
+SELECT id, analysis_id, owner_user_id, owner_guest_id, token_hash, token_ciphertext, created_at, revoked_at
+FROM analysis_shares
+WHERE token_hash = $1
+LIMIT 1`
+
+	var share AnalysisShare
+	var ownerUser sql.NullString
+	var ownerGuest sql.NullString
+	var revokedAt sql.NullTime
+	err := r.DB.QueryRowContext(ctx, query, tokenHash).Scan(
+		&share.ID,
+		&share.AnalysisID,
+		&ownerUser,
+		&ownerGuest,
+		&share.TokenHash,
+		&share.TokenCipher,
+		&share.CreatedAt,
+		&revokedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AnalysisShare{}, ErrShareNotFound
+		}
+		return AnalysisShare{}, err
+	}
+	if ownerUser.Valid {
+		share.OwnerUserID = &ownerUser.String
+	}
+	if ownerGuest.Valid {
+		share.OwnerGuestID = &ownerGuest.String
+	}
+	if revokedAt.Valid {
+		share.RevokedAt = &revokedAt.Time
+	}
+	return share, nil
+}
+
+// CreateShare inserts a new share record.
+func (r *PGRepo) CreateShare(ctx context.Context, share AnalysisShare) error {
+	const query = `
+INSERT INTO analysis_shares (
+	id, analysis_id, owner_user_id, owner_guest_id, token_hash, token_ciphertext, created_at, revoked_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+
+	_, err := r.DB.ExecContext(
+		ctx,
+		query,
+		share.ID,
+		share.AnalysisID,
+		share.OwnerUserID,
+		share.OwnerGuestID,
+		share.TokenHash,
+		share.TokenCipher,
+		share.CreatedAt,
+		share.RevokedAt,
+	)
+	return err
+}
+
+// RevokeShare marks a share as revoked.
+func (r *PGRepo) RevokeShare(ctx context.Context, shareID string, revokedAt time.Time) error {
+	const query = `
+UPDATE analysis_shares
+SET revoked_at = $1
+WHERE id = $2::uuid
+  AND revoked_at IS NULL`
+
+	res, err := r.DB.ExecContext(ctx, query, revokedAt, shareID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrShareNotFound
+	}
+	return nil
+}
+
 // UpdateStatus updates status/result for an analysis.
 func (r *PGRepo) UpdateStatus(ctx context.Context, analysisID, status string, result map[string]any) error {
 	return r.UpdateStatusResultAndError(ctx, analysisID, status, result, nil, nil, nil, nil, nil)

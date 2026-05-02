@@ -30,6 +30,10 @@ func Auth(env string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		if c.Request.Method == http.MethodGet && c.FullPath() == "/api/v1/shares/:token" {
+			c.Next()
+			return
+		}
 
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 

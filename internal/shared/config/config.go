@@ -25,6 +25,8 @@ type Config struct {
 	GoogleClientSecret string
 	GoogleRedirectURL  string
 	UIRedirectURL      string
+	UIBaseURL          string
+	ShareTokenEncKey   string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -57,6 +59,8 @@ func Load() Config {
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
 		UIRedirectURL:      getEnv("UI_REDIRECT_URL", ""),
+		UIBaseURL:          getEnv("UI_BASE_URL", "https://rethinkresume.com"),
+		ShareTokenEncKey:   getEnv("SHARE_TOKEN_ENC_KEY", ""),
 	}
 }
 

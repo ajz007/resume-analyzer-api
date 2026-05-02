@@ -16,6 +16,7 @@ import (
 	"resume-backend/internal/extract"
 	"resume-backend/internal/llm"
 	"resume-backend/internal/queue"
+	sharedcrypto "resume-backend/internal/shared/crypto"
 	"resume-backend/internal/shared/metrics"
 	"resume-backend/internal/shared/storage/object"
 	"resume-backend/internal/shared/telemetry"
@@ -40,6 +41,8 @@ type Service struct {
 	Provider        string
 	Model           string
 	AnalysisVersion string
+	ShareTokenCipher *sharedcrypto.TokenCipher
+	UIBaseURL        string
 }
 
 // Create enqueues a new analysis and kicks off asynchronous completion.
