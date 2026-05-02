@@ -60,11 +60,12 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		return
 	}
 
-	req := startAnalysisRequest{PromptVersion: "v2_3"}
+	var req startAnalysisRequest
 	if err := decodeOptionalJSON(c.Request.Body, &req); err != nil {
 		respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
 		return
 	}
+	req.PromptVersion = NormalizePromptVersion(req.PromptVersion)
 	modeInput := strings.TrimSpace(req.Mode)
 	if modeInput == "" {
 		modeInput = string(ModeJobMatch)
@@ -272,6 +273,21 @@ func (h *Handler) listAnalyses(c *gin.Context) {
 			if ms, ok := a.Result["matchScore"]; ok {
 				item["matchScore"] = ms
 			}
+			if atsScore, ok := extractNestedFloat(a.Result, "ats", "score"); ok {
+				item["atsScore"] = atsScore
+			}
+			if jobMatchScore, ok := extractNestedFloat(a.Result, "jobMatchScoring", "score"); ok {
+				item["jobMatchScore"] = jobMatchScore
+			} else if matchScore, ok := extractFloatAny(a.Result["matchScore"]); ok {
+				item["jobMatchScore"] = matchScore
+			}
+			if aiScreeningScore, ok := extractNestedFloat(a.Result, "aiScreening", "score"); ok {
+				item["aiScreeningScore"] = aiScreeningScore
+			}
+			item["primaryScoreLabel"] = primaryScoreLabel(a.Mode)
+			if aiScreeningTier, ok := extractNestedString(a.Result, "aiScreening", "verdict", "tier"); ok {
+				item["aiScreeningTier"] = aiScreeningTier
+			}
 			if summary, ok := a.Result["summary"]; ok {
 				item["summary"] = summary
 			}
@@ -305,6 +321,57 @@ func extractFinalScore(result map[string]any, mode AnalysisMode) (float64, bool)
 		}
 	}
 	return 0, false
+}
+
+func extractNestedFloat(result map[string]any, path ...string) (float64, bool) {
+	value, ok := extractNestedAny(result, path...)
+	if !ok {
+		return 0, false
+	}
+	return extractFloatAny(value)
+}
+
+func extractNestedString(result map[string]any, path ...string) (string, bool) {
+	value, ok := extractNestedAny(result, path...)
+	if !ok {
+		return "", false
+	}
+	str, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	str = strings.TrimSpace(str)
+	if str == "" {
+		return "", false
+	}
+	return str, true
+}
+
+func extractNestedAny(result map[string]any, path ...string) (any, bool) {
+	if result == nil || len(path) == 0 {
+		return nil, false
+	}
+	var current any = result
+	for _, key := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func primaryScoreLabel(mode AnalysisMode) string {
+	switch mode {
+	case ModeATS:
+		return "ATS Readiness"
+	default:
+		return "Job Match"
+	}
 }
 
 func extractFloatAny(value any) (float64, bool) {

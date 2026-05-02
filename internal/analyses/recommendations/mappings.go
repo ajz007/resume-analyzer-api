@@ -11,6 +11,102 @@ type actionPlanCandidate struct {
 	severity string
 }
 
+func fromFixThisFirst(items []FixThisFirstInput) []Recommendation {
+	out := make([]Recommendation, 0, len(items))
+	for _, item := range items {
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			continue
+		}
+		why := strings.TrimSpace(item.Why)
+		if why == "" {
+			why = "This is one of the highest-priority improvements for role fit."
+		}
+		action := strings.TrimSpace(item.Action)
+		if action == "" {
+			action = "Add concrete resume evidence for this gap."
+		}
+		out = append(out, Recommendation{
+			ID:       "FIX_THIS_FIRST_" + slugify(title),
+			Category: "JOB_FIT",
+			Severity: "warning",
+			Title:    title,
+			Why:      why,
+			Action:   action,
+			Impact:   normalizeRecommendationImpact(item.ExpectedImpact),
+		})
+	}
+	return out
+}
+
+func fromWeakCriticalRequirements(items []RequirementScoreInput) []Recommendation {
+	out := make([]Recommendation, 0, len(items))
+	for _, item := range items {
+		if item.Weight < 15 || item.Score >= 70 {
+			continue
+		}
+		requirement := strings.TrimSpace(item.Requirement)
+		if requirement == "" {
+			requirement = strings.TrimSpace(item.RequirementID)
+		}
+		if requirement == "" {
+			requirement = "high-priority requirement"
+		}
+		action := strings.TrimSpace(item.Gap)
+		if action == "" {
+			action = "Add a concrete bullet proving this requirement."
+		}
+		impact := "medium"
+		if item.Weight >= 20 {
+			impact = "high"
+		}
+		out = append(out, Recommendation{
+			ID:       "JOB_FIT_REQUIREMENT_" + slugify(requirement),
+			Category: "JOB_FIT",
+			Severity: "warning",
+			Title:    "Strengthen evidence for: " + requirement,
+			Why:      "This appears to be a high-priority requirement for the role.",
+			Action:   action,
+			Impact:   impact,
+		})
+	}
+	return out
+}
+
+func fromAIScreeningWeaknesses(items []AIScreeningBreakdownInput) []Recommendation {
+	out := make([]Recommendation, 0, len(items))
+	for _, item := range items {
+		if item.Score >= 70 {
+			continue
+		}
+		label := strings.TrimSpace(item.Label)
+		if label == "" {
+			label = strings.TrimSpace(item.ID)
+		}
+		if label == "" {
+			label = "AI screening signal"
+		}
+		why := strings.TrimSpace(item.Explanation)
+		if why == "" {
+			why = "This weakens screening readiness for AI-assisted review."
+		}
+		action := strings.TrimSpace(item.ImprovementFocus)
+		if action == "" {
+			action = "Add clearer, more specific evidence in the resume."
+		}
+		out = append(out, Recommendation{
+			ID:       "AI_SCREENING_" + slugify(item.ID+" "+label),
+			Category: "AI_SCREENING",
+			Severity: "warning",
+			Title:    "Improve " + label,
+			Why:      why,
+			Action:   action,
+			Impact:   aiScreeningImpact(item.ID),
+		})
+	}
+	return out
+}
+
 func fromIssues(issues []Issue) []Recommendation {
 	out := make([]Recommendation, 0, len(issues))
 	for _, issue := range issues {
@@ -209,4 +305,24 @@ func sortByImpactThenTitle(items []actionPlanCandidate) {
 		}
 		return strings.ToLower(items[i].title) < strings.ToLower(items[j].title)
 	})
+}
+
+func normalizeRecommendationImpact(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "HIGH":
+		return "high"
+	case "MEDIUM":
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func aiScreeningImpact(id string) string {
+	switch strings.TrimSpace(id) {
+	case "evidence_strength", "semantic_relevance", "role_intent_alignment":
+		return "high"
+	default:
+		return "medium"
+	}
 }

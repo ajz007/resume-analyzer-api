@@ -198,3 +198,131 @@ func TestNormalizeFinalScoreATSModeUsesATSScore(t *testing.T) {
 		t.Fatalf("expected meta.primaryScoreType ATS, got %v", meta["primaryScoreType"])
 	}
 }
+
+func TestNormalizeV2_4ReturnsJobRequirementProfile(t *testing.T) {
+	result := normalizeV2_4Fixture(t, func(r *AnalysisResultV2_4) {
+		r.JobRequirementProfile.PrimaryRole = " Backend Engineer "
+	})
+
+	profile, ok := result["jobRequirementProfile"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected jobRequirementProfile in normalized result")
+	}
+	if profile["primaryRole"] != "Backend Engineer" {
+		t.Fatalf("expected trimmed primaryRole, got %v", profile["primaryRole"])
+	}
+	topPriorities, ok := profile["topPriorities"].([]any)
+	if !ok || len(topPriorities) == 0 {
+		t.Fatalf("expected topPriorities list, got %v", profile["topPriorities"])
+	}
+}
+
+func TestNormalizeV2_4JobMatchFinalScoreUsesRecomputedScore(t *testing.T) {
+	result := normalizeV2_4Fixture(t, func(r *AnalysisResultV2_4) {
+		r.JobMatchScoring.Score = 99
+	})
+
+	if got, ok := result["matchScore"].(float64); !ok || got != 78 {
+		t.Fatalf("expected recomputed matchScore 78, got %v", result["matchScore"])
+	}
+	if got, ok := result["finalScore"].(float64); !ok || got != 78 {
+		t.Fatalf("expected finalScore 78, got %v", result["finalScore"])
+	}
+	scoring, ok := result["jobMatchScoring"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected jobMatchScoring in normalized result")
+	}
+	if got, ok := scoring["score"].(float64); !ok || got != 78 {
+		t.Fatalf("expected jobMatchScoring.score 78, got %v", scoring["score"])
+	}
+}
+
+func TestNormalizeV2_4ATSModeUsesATSScoreAndZeroMatchScore(t *testing.T) {
+	raw := validAnalysisResultV2_4()
+	raw.Meta.Mode = string(ModeATS)
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal v2_4 fixture: %v", err)
+	}
+
+	result, err := normalizeAnalysisResult(payload, Analysis{PromptVersion: "v2_4", Model: "test-model", Mode: ModeATS})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, ok := result["finalScore"].(float64); !ok || got != 82 {
+		t.Fatalf("expected finalScore 82, got %v", result["finalScore"])
+	}
+	if got, ok := result["matchScore"].(float64); !ok || got != 0 {
+		t.Fatalf("expected matchScore 0, got %v", result["matchScore"])
+	}
+}
+
+func TestNormalizeV2_4AIScreeningScoreIsRecomputed(t *testing.T) {
+	result := normalizeV2_4Fixture(t, func(r *AnalysisResultV2_4) {
+		r.AIScreening.Score = 100
+		r.AIScreening.Verdict.Tier = "STRONG"
+		r.AIScreening.Verdict.ScreeningRisk = "LOW"
+	})
+
+	screening, ok := result["aiScreening"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected aiScreening in normalized result")
+	}
+	if got, ok := screening["score"].(float64); !ok || got != 80 {
+		t.Fatalf("expected recomputed aiScreening.score 80, got %v", screening["score"])
+	}
+	verdict, ok := screening["verdict"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected aiScreening.verdict")
+	}
+	if verdict["tier"] != "GOOD" {
+		t.Fatalf("expected recomputed tier GOOD, got %v", verdict["tier"])
+	}
+	if verdict["screeningRisk"] != "LOW" {
+		t.Fatalf("expected recomputed screeningRisk LOW, got %v", verdict["screeningRisk"])
+	}
+}
+
+func TestNormalizeV2_4FixThisFirstFallbackCreatedWhenMissing(t *testing.T) {
+	result := normalizeV2_4Fixture(t, func(r *AnalysisResultV2_4) {
+		r.FixThisFirst = nil
+		r.JobMatchScoring.RequirementScores[0].Score = 55
+		r.JobMatchScoring.RequirementScores[0].MatchStatus = "WEAK"
+		r.JobMatchScoring.RequirementScores[1].Score = 65
+		r.JobMatchScoring.RequirementScores[1].MatchStatus = "PARTIAL"
+		r.JobMatchScoring.RequirementScores[2].Score = 80
+		r.JobMatchScoring.RequirementScores[2].MatchStatus = "STRONG"
+	})
+
+	items, ok := result["fixThisFirst"].([]any)
+	if !ok {
+		t.Fatalf("expected fixThisFirst list, got %v", result["fixThisFirst"])
+	}
+	if len(items) == 0 {
+		t.Fatalf("expected fallback fixThisFirst items")
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fixThisFirst item object")
+	}
+	if first["linkedRequirementId"] != "req_backend_go" {
+		t.Fatalf("expected first fallback linked to req_backend_go, got %v", first["linkedRequirementId"])
+	}
+}
+
+func normalizeV2_4Fixture(t *testing.T, mutate func(*AnalysisResultV2_4)) map[string]any {
+	t.Helper()
+	raw := validAnalysisResultV2_4()
+	if mutate != nil {
+		mutate(&raw)
+	}
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal v2_4 fixture: %v", err)
+	}
+	result, err := normalizeAnalysisResult(payload, Analysis{PromptVersion: "v2_4", Model: "test-model", Mode: ModeJobMatch})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return result
+}

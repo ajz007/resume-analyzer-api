@@ -393,3 +393,47 @@ func TestProcessAnalysisSkipsFailed(t *testing.T) {
 		t.Fatalf("expected status failed, got %s", got.Status)
 	}
 }
+
+func TestServiceRoutesV2_4ToValidatedRetryFlow(t *testing.T) {
+	first := validAnalysisResultV2_4()
+	first.AIScreening.AIRecruiterVerdict.OneLineVerdict = "This resume gets a guaranteed interview."
+	firstPayload, err := json.Marshal(first)
+	if err != nil {
+		t.Fatalf("marshal first v2_4: %v", err)
+	}
+	second := validAnalysisResultV2_4()
+	second.AIScreening.AIRecruiterVerdict.OneLineVerdict = "Strong screening readiness with clearer evidence."
+	secondPayload, err := json.Marshal(second)
+	if err != nil {
+		t.Fatalf("marshal second v2_4: %v", err)
+	}
+	mock := &sequenceLLMResponse{resp: []string{string(firstPayload), string(secondPayload)}}
+	svc, repo, _, docID := setupServiceWithDoc(t, mock)
+
+	analysis := Analysis{
+		ID:             "analysis-v2-4-route",
+		DocumentID:     docID,
+		UserID:         "user-1",
+		JobDescription: "backend engineer role",
+		PromptVersion:  "v2_4",
+		Mode:           ModeJobMatch,
+		Status:         StatusQueued,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := repo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	svc.completeAsync(context.Background(), analysis.ID)
+
+	got, err := repo.GetByID(context.Background(), analysis.ID)
+	if err != nil {
+		t.Fatalf("get analysis: %v", err)
+	}
+	if got.Status != StatusCompleted {
+		t.Fatalf("expected status completed, got %s error=%v", got.Status, got.ErrorMessage)
+	}
+	if mock.calls != 2 {
+		t.Fatalf("expected v2_4 validation retry path to call LLM twice, got %d", mock.calls)
+	}
+}

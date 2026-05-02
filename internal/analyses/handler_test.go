@@ -24,6 +24,7 @@ import (
 
 func TestStartAnalysisDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv(analysisPromptVersionEnv, "")
 
 	router, docRepo, analysisRepo, store, queueStub := setupAnalysisRouter(t)
 	userID := "guest:test-guest"
@@ -69,6 +70,46 @@ func TestStartAnalysisDefaults(t *testing.T) {
 	}
 	if len(queueStub.messages) != 1 {
 		t.Fatalf("expected 1 queued message, got %d", len(queueStub.messages))
+	}
+}
+
+func TestStartAnalysisUsesEnvDefaultPromptVersion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv(analysisPromptVersionEnv, "v2_4")
+
+	router, docRepo, analysisRepo, store, _ := setupAnalysisRouter(t)
+	userID := "guest:test-guest"
+	documentID := seedDocument(t, docRepo, store, userID)
+
+	payload := map[string]string{
+		"jobDescription": strings.Repeat("a", 300),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+documentID+"/analyze", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addGuestHeader(req)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", resp.Code)
+	}
+	var created struct {
+		AnalysisID string `json:"analysisId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	analysis, err := analysisRepo.GetByID(context.Background(), created.AnalysisID)
+	if err != nil {
+		t.Fatalf("get analysis: %v", err)
+	}
+	if analysis.PromptVersion != "v2_4" {
+		t.Fatalf("expected promptVersion v2_4, got %q", analysis.PromptVersion)
 	}
 }
 
@@ -405,10 +446,12 @@ func TestListAnalysesIncludesFinalScore(t *testing.T) {
 	handler := NewHandler(svc, nil)
 
 	analysis := Analysis{
-		ID:         "analysis-list",
-		DocumentID: "doc-1",
-		UserID:     "user-1",
-		Status:     StatusCompleted,
+		ID:            "analysis-list",
+		DocumentID:    "doc-1",
+		UserID:        "user-1",
+		PromptVersion: "v2_3",
+		Mode:          ModeJobMatch,
+		Status:        StatusCompleted,
 		Result: map[string]any{
 			"finalScore": 74.0,
 			"matchScore": 81.0,
@@ -445,6 +488,127 @@ func TestListAnalysesIncludesFinalScore(t *testing.T) {
 	}
 	if item["matchScore"] != 81.0 {
 		t.Fatalf("expected matchScore 81, got %v", item["matchScore"])
+	}
+	if item["primaryScoreLabel"] != "Job Match" {
+		t.Fatalf("expected primaryScoreLabel Job Match, got %v", item["primaryScoreLabel"])
+	}
+}
+
+func TestListAnalysesIncludesV2_4ScoreSummaryFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	analysisRepo := NewMemoryRepo()
+	svc := &Service{Repo: analysisRepo}
+	handler := NewHandler(svc, nil)
+
+	analysis := Analysis{
+		ID:            "analysis-list-v2-4",
+		DocumentID:    "doc-1",
+		UserID:        "user-1",
+		PromptVersion: "v2_4",
+		Mode:          ModeJobMatch,
+		Status:        StatusCompleted,
+		Result: map[string]any{
+			"finalScore": 77.0,
+			"matchScore": 77.0,
+			"ats":        map[string]any{"score": 82.0},
+			"jobMatchScoring": map[string]any{
+				"score": 77.0,
+			},
+			"aiScreening": map[string]any{
+				"score": 80.0,
+				"verdict": map[string]any{
+					"tier": "GOOD",
+				},
+			},
+			"summary": "done",
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/analyses", nil)
+	c.Set("userId", "user-1")
+	c.Set("isGuest", false)
+
+	handler.listAnalyses(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var payload []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(payload))
+	}
+	item := payload[0]
+	if item["atsScore"] != 82.0 {
+		t.Fatalf("expected atsScore 82, got %v", item["atsScore"])
+	}
+	if item["jobMatchScore"] != 77.0 {
+		t.Fatalf("expected jobMatchScore 77, got %v", item["jobMatchScore"])
+	}
+	if item["aiScreeningScore"] != 80.0 {
+		t.Fatalf("expected aiScreeningScore 80, got %v", item["aiScreeningScore"])
+	}
+	if item["aiScreeningTier"] != "GOOD" {
+		t.Fatalf("expected aiScreeningTier GOOD, got %v", item["aiScreeningTier"])
+	}
+	if item["primaryScoreLabel"] != "Job Match" {
+		t.Fatalf("expected primaryScoreLabel Job Match, got %v", item["primaryScoreLabel"])
+	}
+}
+
+func TestListAnalysesATSModePrimaryScoreLabel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	analysisRepo := NewMemoryRepo()
+	svc := &Service{Repo: analysisRepo}
+	handler := NewHandler(svc, nil)
+
+	analysis := Analysis{
+		ID:         "analysis-list-ats",
+		DocumentID: "doc-1",
+		UserID:     "user-1",
+		Mode:       ModeATS,
+		Status:     StatusCompleted,
+		Result: map[string]any{
+			"finalScore": 82.0,
+			"matchScore": 0.0,
+			"ats":        map[string]any{"score": 82.0},
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/analyses", nil)
+	c.Set("userId", "user-1")
+	c.Set("isGuest", false)
+
+	handler.listAnalyses(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var payload []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(payload))
+	}
+	if payload[0]["primaryScoreLabel"] != "ATS Readiness" {
+		t.Fatalf("expected primaryScoreLabel ATS Readiness, got %v", payload[0]["primaryScoreLabel"])
 	}
 }
 

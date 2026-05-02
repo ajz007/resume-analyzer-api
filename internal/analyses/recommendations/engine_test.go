@@ -141,3 +141,84 @@ func TestGenerateRecommendationsMissingJDKeywords(t *testing.T) {
 		t.Fatalf("expected title %q, got %q", "Add missing job keywords", recs[0].Title)
 	}
 }
+
+func TestGenerateRecommendationsPrioritizesFixThisFirst(t *testing.T) {
+	input := Input{
+		FixThisFirst: []FixThisFirstInput{
+			{
+				Title:          "Add proof for Go backend ownership",
+				Why:            "This is the highest-weight gap.",
+				Action:         "Add a bullet with production Go service ownership.",
+				ExpectedImpact: "HIGH",
+			},
+		},
+		MissingJDKeywords: []string{"Go"},
+	}
+
+	recs := GenerateRecommendations(input)
+	if len(recs) == 0 {
+		t.Fatalf("expected recommendations")
+	}
+	if recs[0].Category != "JOB_FIT" {
+		t.Fatalf("expected JOB_FIT recommendation first, got %s", recs[0].Category)
+	}
+	if recs[0].Title != "Add proof for Go backend ownership" {
+		t.Fatalf("expected fixThisFirst title first, got %q", recs[0].Title)
+	}
+}
+
+func TestGenerateRecommendationsWeakCriticalRequirement(t *testing.T) {
+	input := Input{
+		RequirementScores: []RequirementScoreInput{
+			{
+				RequirementID: "req_aws",
+				Requirement:   "AWS production experience",
+				Weight:        25,
+				Score:         62,
+				Gap:           "Name the AWS services used in production.",
+			},
+		},
+	}
+
+	recs := GenerateRecommendations(input)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+	if recs[0].Category != "JOB_FIT" {
+		t.Fatalf("expected JOB_FIT category, got %s", recs[0].Category)
+	}
+	if recs[0].Title != "Strengthen evidence for: AWS production experience" {
+		t.Fatalf("unexpected title %q", recs[0].Title)
+	}
+	if recs[0].Impact != "high" {
+		t.Fatalf("expected high impact, got %s", recs[0].Impact)
+	}
+}
+
+func TestGenerateRecommendationsWeakAIScreeningDimension(t *testing.T) {
+	input := Input{
+		AIScreeningBreakdown: []AIScreeningBreakdownInput{
+			{
+				ID:               "evidence_strength",
+				Label:            "Evidence Strength",
+				Score:            64,
+				Explanation:      "Claims need clearer proof.",
+				ImprovementFocus: "Add metrics and source evidence.",
+			},
+		},
+	}
+
+	recs := GenerateRecommendations(input)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+	if recs[0].Category != "AI_SCREENING" {
+		t.Fatalf("expected AI_SCREENING category, got %s", recs[0].Category)
+	}
+	if recs[0].Title != "Improve Evidence Strength" {
+		t.Fatalf("unexpected title %q", recs[0].Title)
+	}
+	if recs[0].Impact != "high" {
+		t.Fatalf("expected high impact, got %s", recs[0].Impact)
+	}
+}

@@ -1,0 +1,173 @@
+{
+  "meta": {
+    "promptVersion": "v2_4",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.75,
+    "assumptions": [],
+    "limitations": [],
+    "mode": "ATS",
+    "primaryScoreType": "ATS"
+  },
+  "summary": {
+    "overallAssessment": "Clear resume with good ATS readability.",
+    "strengths": ["Readable structure"],
+    "weaknesses": ["Some impact evidence is light"]
+  },
+  "ats": {
+    "score": 82,
+    "scoreBreakdown": {
+      "skills": 25,
+      "experience": 25,
+      "impact": 20,
+      "formatting": 15,
+      "roleFit": 15
+    },
+    "scoreReasoning": [
+      "Core skills are visible.",
+      "Experience is easy to scan.",
+      "Impact could be more specific."
+    ],
+    "scoreExplanation": {
+      "components": [
+        {
+          "key": "atsReadability",
+          "label": "ATS Readability",
+          "score": 82,
+          "weight": 25,
+          "explanation": "Clear section headings.",
+          "helped": ["Standard headings"],
+          "dragged": ["Dense bullets"]
+        },
+        {
+          "key": "skillMatch",
+          "label": "Skill Match",
+          "score": 80,
+          "weight": 30,
+          "explanation": "Skills are easy to identify.",
+          "helped": ["Skills section"],
+          "dragged": ["Some tools are missing context"]
+        },
+        {
+          "key": "experienceRelevance",
+          "label": "Experience Relevance",
+          "score": 82,
+          "weight": 30,
+          "explanation": "Recent roles are relevant.",
+          "helped": ["Recent experience"],
+          "dragged": ["Limited project scale"]
+        },
+        {
+          "key": "resumeStructure",
+          "label": "Resume Structure",
+          "score": 84,
+          "weight": 15,
+          "explanation": "Structure is consistent.",
+          "helped": ["Concise layout"],
+          "dragged": ["No major issues noted"]
+        }
+      ]
+    },
+    "missingKeywords": {
+      "fromJobDescription": [],
+      "industryCommon": ["observability"]
+    },
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {
+    "quickWins": [],
+    "mediumEffort": [],
+    "deepFixes": []
+  },
+  "jobRequirementProfile": {
+    "isApplicable": false,
+    "primaryRole": "",
+    "seniority": "UNCLEAR",
+    "roleType": "UNCLEAR",
+    "recruiterIntentSummary": "",
+    "topPriorities": [],
+    "hiddenExpectations": [],
+    "niceToHaveSignals": []
+  },
+  "jobMatchScoring": {
+    "score": 0,
+    "scoringStrategy": "",
+    "requirementScores": [],
+    "explanation": ""
+  },
+  "aiScreening": {
+    "score": 10,
+    "verdict": {
+      "tier": "WEAK",
+      "title": "Good screening readability",
+      "summary": "The resume is generally readable for AI-assisted screening.",
+      "screeningRisk": "HIGH"
+    },
+    "scoreBreakdown": [
+      {
+        "id": "semantic_relevance",
+        "label": "Semantic Relevance",
+        "score": 80,
+        "weight": 25,
+        "status": "OK",
+        "explanation": "The resume has clear role signals.",
+        "improvementFocus": "Clarify target title."
+      },
+      {
+        "id": "role_intent_alignment",
+        "label": "Role Intent Alignment",
+        "score": 75,
+        "weight": 20,
+        "status": "OK",
+        "explanation": "Career direction is mostly clear.",
+        "improvementFocus": "Add a sharper headline."
+      },
+      {
+        "id": "evidence_strength",
+        "label": "Evidence Strength",
+        "score": 70,
+        "weight": 20,
+        "status": "OK",
+        "explanation": "Evidence is present but could be stronger.",
+        "improvementFocus": "Add quantified outcomes."
+      },
+      {
+        "id": "impact_strength",
+        "label": "Impact Strength",
+        "score": 70,
+        "weight": 15,
+        "status": "OK",
+        "explanation": "Impact claims are credible.",
+        "improvementFocus": "Add metrics where available."
+      },
+      {
+        "id": "signal_density",
+        "label": "Signal Density",
+        "score": 80,
+        "weight": 10,
+        "status": "OK",
+        "explanation": "Relevant terms are visible.",
+        "improvementFocus": "Keep skills aligned with experience."
+      },
+      {
+        "id": "clarity_specificity",
+        "label": "Clarity Specificity",
+        "score": 80,
+        "weight": 10,
+        "status": "OK",
+        "explanation": "Most content is clear.",
+        "improvementFocus": "Tighten vague bullets."
+      }
+    ],
+    "aiRecruiterVerdict": {
+      "oneLineVerdict": "Readable resume with moderate screening readiness.",
+      "mainConcern": "Evidence could be more specific.",
+      "strongestSignal": "Clear structure.",
+      "weakestSignal": "Limited metrics."
+    }
+  },
+  "fixThisFirst": []
+}

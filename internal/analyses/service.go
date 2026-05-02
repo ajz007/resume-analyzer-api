@@ -32,15 +32,15 @@ const (
 
 // Service contains business logic for analyses.
 type Service struct {
-	Repo            Repo
-	Usage           *usage.Service
-	DocRepo         documents.DocumentsRepo
-	Store           object.ObjectStore
-	LLM             llm.Client
-	JobQueue        queue.Client
-	Provider        string
-	Model           string
-	AnalysisVersion string
+	Repo             Repo
+	Usage            *usage.Service
+	DocRepo          documents.DocumentsRepo
+	Store            object.ObjectStore
+	LLM              llm.Client
+	JobQueue         queue.Client
+	Provider         string
+	Model            string
+	AnalysisVersion  string
 	ShareTokenCipher *sharedcrypto.TokenCipher
 	UIBaseURL        string
 }
@@ -50,9 +50,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 	if documentID == "" || userID == "" {
 		return Analysis{}, errors.New("documentID and userID are required")
 	}
-	if promptVersion == "" {
-		promptVersion = "v2_3"
-	}
+	promptVersion = NormalizePromptVersion(promptVersion)
 
 	if s.Usage != nil {
 		ok, _, err := s.Usage.CanConsume(ctx, userID, 1)
@@ -108,9 +106,7 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 	if documentID == "" || userID == "" {
 		return Analysis{}, false, errors.New("documentID and userID are required")
 	}
-	if promptVersion == "" {
-		promptVersion = "v2_3"
-	}
+	promptVersion = NormalizePromptVersion(promptVersion)
 	if mode == "" {
 		mode = ModeJobMatch
 	}
@@ -373,6 +369,18 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 		raw, err = ValidateV2_2WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
 			err = fmt.Errorf("llm validate v2_2: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
+		}
+		if err := s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+			err = fmt.Errorf("set analysis raw failed: %w", err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
+		}
+	} else if analysis.PromptVersion == "v2_4" {
+		raw, err = ValidateV2_4WithRetry(ctxWithHash, llmClient, input)
+		if err != nil {
+			err = fmt.Errorf("llm validate v2_4: %w", err)
 			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 			return err
 		}
