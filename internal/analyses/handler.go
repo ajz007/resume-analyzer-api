@@ -37,6 +37,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/documents/:id/analyze", h.startAnalysis)
 	rg.GET("/analyses", h.listAnalyses)
 	rg.GET("/analyses/:id", h.getAnalysis)
+	rg.POST("/analyses/:id/shares", h.createShare)
+	rg.GET("/shares/:token", h.getSharedAnalysis)
+	rg.DELETE("/shares/:token", h.revokeShare)
 }
 
 type startAnalysisRequest struct {
@@ -341,4 +344,94 @@ func decodeOptionalJSON(body io.ReadCloser, out any) error {
 		return errInvalidJSON
 	}
 	return nil
+}
+
+func (h *Handler) createShare(c *gin.Context) {
+	analysisID := strings.TrimSpace(c.Param("id"))
+	if analysisID == "" {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "analysis id is required", nil)
+		return
+	}
+
+	share, token, err := h.Svc.CreateShare(c.Request.Context(), analysisID, middleware.UserIDFromContext(c))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			respond.Error(c, http.StatusNotFound, "not_found", "analysis not found", nil)
+		case errors.Is(err, ErrForbidden):
+			respond.Error(c, http.StatusForbidden, "forbidden", "not allowed", nil)
+		default:
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to create share", err)
+		}
+		return
+	}
+
+	respond.JSON(c, http.StatusCreated, gin.H{
+		"shareId":  share.ID,
+		"token":    token,
+		"shareUrl": buildShareURL(h.Svc.UIBaseURL, token),
+	})
+}
+
+func (h *Handler) getSharedAnalysis(c *gin.Context) {
+	token := strings.TrimSpace(c.Param("token"))
+	if token == "" {
+		respond.Error(c, http.StatusNotFound, "not_found", "share not found", nil)
+		return
+	}
+
+	analysis, err := h.Svc.GetSharedAnalysisByToken(c.Request.Context(), token)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrShareNotFound):
+			respond.Error(c, http.StatusNotFound, "not_found", "share not found", nil)
+		default:
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to fetch shared analysis", err)
+		}
+		return
+	}
+
+	resp := gin.H{
+		"id":     analysis.ID,
+		"mode":   analysis.Mode,
+		"status": analysis.Status,
+		"result": analysis.Result,
+	}
+	if analysis.StartedAt != nil {
+		resp["startedAt"] = analysis.StartedAt
+	}
+	if analysis.CompletedAt != nil {
+		resp["completedAt"] = analysis.CompletedAt
+	}
+	respond.JSON(c, http.StatusOK, resp)
+}
+
+func (h *Handler) revokeShare(c *gin.Context) {
+	token := strings.TrimSpace(c.Param("token"))
+	if token == "" {
+		respond.Error(c, http.StatusNotFound, "not_found", "share not found", nil)
+		return
+	}
+
+	err := h.Svc.RevokeShareByToken(c.Request.Context(), token, middleware.UserIDFromContext(c))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrShareNotFound):
+			respond.Error(c, http.StatusNotFound, "not_found", "share not found", nil)
+		case errors.Is(err, ErrForbidden):
+			respond.Error(c, http.StatusForbidden, "forbidden", "not allowed", nil)
+		default:
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to revoke share", err)
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func buildShareURL(baseURL, token string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" {
+		return "/app/share/" + token
+	}
+	return baseURL + "/app/share/" + token
 }

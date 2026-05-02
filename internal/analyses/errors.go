@@ -4,6 +4,8 @@ import "errors"
 
 var (
 	ErrNotFound              = errors.New("not found")
+	ErrForbidden             = errors.New("forbidden")
+	ErrShareNotFound         = errors.New("share not found")
 	ErrRetryRequired         = errors.New("retry required")
 	ErrJobQueueNotConfigured = errors.New("job queue not configured")
 )

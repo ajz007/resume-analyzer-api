@@ -23,6 +23,7 @@ import (
 	openai "resume-backend/internal/llm/openai"
 	"resume-backend/internal/queue"
 	"resume-backend/internal/shared/config"
+	sharedcrypto "resume-backend/internal/shared/crypto"
 	"resume-backend/internal/shared/server"
 	"resume-backend/internal/shared/storage/db"
 	"resume-backend/internal/shared/storage/object"
@@ -279,6 +280,14 @@ func buildServices(app *App) error {
 		Provider:        app.Config.LLMProvider,
 		Model:           app.Config.LLMModel,
 		AnalysisVersion: app.Config.AnalysisVersion,
+		UIBaseURL:       strings.TrimSpace(app.Config.UIBaseURL),
+	}
+	if strings.TrimSpace(app.Config.ShareTokenEncKey) != "" {
+		tokenCipher, err := sharedcrypto.NewTokenCipher(app.Config.ShareTokenEncKey)
+		if err != nil {
+			return fmt.Errorf("invalid SHARE_TOKEN_ENC_KEY: %w", err)
+		}
+		analysisSvc.ShareTokenCipher = tokenCipher
 	}
 
 	analysisAdapter := analysisAdapter{repo: analysisRepo}

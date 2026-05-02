@@ -2,6 +2,7 @@ package analyses
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -9,16 +10,20 @@ import (
 
 // MemoryRepo stores analyses in memory and is safe for concurrent use.
 type MemoryRepo struct {
-	mu     sync.RWMutex
-	byID   map[string]Analysis
-	byUser map[string][]Analysis
+	mu           sync.RWMutex
+	byID         map[string]Analysis
+	byUser       map[string][]Analysis
+	sharesByID   map[string]AnalysisShare
+	shareByToken map[string]string
 }
 
 // NewMemoryRepo constructs a MemoryRepo.
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		byID:   make(map[string]Analysis),
-		byUser: make(map[string][]Analysis),
+		byID:         make(map[string]Analysis),
+		byUser:       make(map[string][]Analysis),
+		sharesByID:   make(map[string]AnalysisShare),
+		shareByToken: make(map[string]string),
 	}
 }
 
@@ -95,6 +100,92 @@ func (r *MemoryRepo) GetByID(ctx context.Context, analysisID string) (Analysis, 
 		return Analysis{}, ErrNotFound
 	}
 	return analysis, nil
+}
+
+// GetActiveShareByAnalysisOwner returns the latest active share for an analysis/owner pair.
+func (r *MemoryRepo) GetActiveShareByAnalysisOwner(ctx context.Context, analysisID string, ownerUserID *string, ownerGuestID *string) (AnalysisShare, error) {
+	if err := ctx.Err(); err != nil {
+		return AnalysisShare{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var latest *AnalysisShare
+	for _, share := range r.sharesByID {
+		if share.AnalysisID != analysisID || share.RevokedAt != nil {
+			continue
+		}
+		if !shareOwnerMatches(share, ownerUserID, ownerGuestID) {
+			continue
+		}
+		copy := share
+		if latest == nil || copy.CreatedAt.After(latest.CreatedAt) {
+			latest = &copy
+		}
+	}
+	if latest == nil {
+		return AnalysisShare{}, ErrShareNotFound
+	}
+	return *latest, nil
+}
+
+// GetShareByTokenHash returns a share by token hash.
+func (r *MemoryRepo) GetShareByTokenHash(ctx context.Context, tokenHash string) (AnalysisShare, error) {
+	if err := ctx.Err(); err != nil {
+		return AnalysisShare{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	shareID, ok := r.shareByToken[tokenHash]
+	if !ok {
+		return AnalysisShare{}, ErrShareNotFound
+	}
+	share, ok := r.sharesByID[shareID]
+	if !ok {
+		return AnalysisShare{}, ErrShareNotFound
+	}
+	return share, nil
+}
+
+// CreateShare stores a new analysis share.
+func (r *MemoryRepo) CreateShare(ctx context.Context, share AnalysisShare) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.byID[share.AnalysisID]; !ok {
+		return ErrNotFound
+	}
+	if existingShareID, exists := r.shareByToken[share.TokenHash]; exists && existingShareID != "" {
+		return errors.New("share token already exists")
+	}
+	r.sharesByID[share.ID] = share
+	r.shareByToken[share.TokenHash] = share.ID
+	return nil
+}
+
+// RevokeShare marks a share as revoked.
+func (r *MemoryRepo) RevokeShare(ctx context.Context, shareID string, revokedAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	share, ok := r.sharesByID[shareID]
+	if !ok {
+		return ErrShareNotFound
+	}
+	if share.RevokedAt != nil {
+		return ErrShareNotFound
+	}
+	revoked := revokedAt
+	share.RevokedAt = &revoked
+	r.sharesByID[shareID] = share
+	return nil
 }
 
 // UpdateStatus updates the status and result for an existing analysis.
@@ -302,4 +393,15 @@ func (r *MemoryRepo) ClaimGuest(ctx context.Context, guestUserID, authedUserID s
 	r.byUser[authedUserID] = append(r.byUser[authedUserID], guestAnalyses...)
 	delete(r.byUser, guestUserID)
 	return len(guestAnalyses), nil
+}
+
+func shareOwnerMatches(share AnalysisShare, ownerUserID *string, ownerGuestID *string) bool {
+	switch {
+	case ownerUserID != nil:
+		return share.OwnerUserID != nil && *share.OwnerUserID == *ownerUserID && share.OwnerGuestID == nil
+	case ownerGuestID != nil:
+		return share.OwnerGuestID != nil && *share.OwnerGuestID == *ownerGuestID && share.OwnerUserID == nil
+	default:
+		return false
+	}
 }
