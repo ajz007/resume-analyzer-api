@@ -11,16 +11,58 @@ import (
 
 // NormalizedAnalysisResult is the single normalized response schema returned by the API.
 type NormalizedAnalysisResult struct {
-	Meta               MetaV2                    `json:"meta"`
-	Summary            SummaryV1                 `json:"summary"`
-	ATS                NormalizedATS             `json:"ats"`
-	FinalScore         float64                   `json:"finalScore"`
-	MatchScore         float64                   `json:"matchScore"`
-	Issues             []IssueV2_2               `json:"issues"`
-	BulletRewrites     []NormalizedBulletRewrite `json:"bulletRewrites"`
-	MissingInformation []string                  `json:"missingInformation"`
-	ActionPlan         ActionPlanV1              `json:"actionPlan"`
-	Recommendations    []Recommendation          `json:"recommendations"`
+	Meta                  MetaV2                    `json:"meta"`
+	Summary               SummaryV1                 `json:"summary"`
+	FinalScore            float64                   `json:"finalScore"`
+	MatchScore            float64                   `json:"matchScore"`
+	ATS                   NormalizedATS             `json:"ats"`
+	JobRequirementProfile JobRequirementProfileV1   `json:"jobRequirementProfile,omitempty"`
+	JobMatchScoring       JobMatchScoringV1         `json:"jobMatchScoring,omitempty"`
+	AIScreening           AIScreeningV1             `json:"aiScreening,omitempty"`
+	FixThisFirst          []FixThisFirstItemV1      `json:"fixThisFirst,omitempty"`
+	Issues                []IssueV2_2               `json:"issues"`
+	BulletRewrites        []NormalizedBulletRewrite `json:"bulletRewrites"`
+	Recommendations       []Recommendation          `json:"recommendations"`
+	MissingInformation    []string                  `json:"missingInformation"`
+	ActionPlan            ActionPlanV1              `json:"actionPlan"`
+}
+
+func (r NormalizedAnalysisResult) MarshalJSON() ([]byte, error) {
+	type normalizedResponse struct {
+		Meta                  MetaV2                    `json:"meta"`
+		Summary               SummaryV1                 `json:"summary"`
+		FinalScore            float64                   `json:"finalScore"`
+		MatchScore            float64                   `json:"matchScore"`
+		ATS                   NormalizedATS             `json:"ats"`
+		JobRequirementProfile *JobRequirementProfileV1  `json:"jobRequirementProfile,omitempty"`
+		JobMatchScoring       *JobMatchScoringV1        `json:"jobMatchScoring,omitempty"`
+		AIScreening           *AIScreeningV1            `json:"aiScreening,omitempty"`
+		FixThisFirst          *[]FixThisFirstItemV1     `json:"fixThisFirst,omitempty"`
+		Issues                []IssueV2_2               `json:"issues"`
+		BulletRewrites        []NormalizedBulletRewrite `json:"bulletRewrites"`
+		Recommendations       []Recommendation          `json:"recommendations"`
+		MissingInformation    []string                  `json:"missingInformation"`
+		ActionPlan            ActionPlanV1              `json:"actionPlan"`
+	}
+	out := normalizedResponse{
+		Meta:               r.Meta,
+		Summary:            r.Summary,
+		FinalScore:         r.FinalScore,
+		MatchScore:         r.MatchScore,
+		ATS:                r.ATS,
+		Issues:             r.Issues,
+		BulletRewrites:     r.BulletRewrites,
+		Recommendations:    r.Recommendations,
+		MissingInformation: r.MissingInformation,
+		ActionPlan:         r.ActionPlan,
+	}
+	if strings.EqualFold(r.Meta.PromptVersion, "v2_4") {
+		out.JobRequirementProfile = &r.JobRequirementProfile
+		out.JobMatchScoring = &r.JobMatchScoring
+		out.AIScreening = &r.AIScreening
+		out.FixThisFirst = &r.FixThisFirst
+	}
+	return json.Marshal(out)
 }
 
 type NormalizedATS struct {
@@ -85,6 +127,15 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 	}
 
 	switch {
+	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_4"):
+		var parsed AnalysisResultV2_4
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return NormalizedAnalysisResult{}, err
+		}
+		out := normalizeFromV2_4(parsed, analysis)
+		out.Recommendations = normalizeRecommendations(recommendations.GenerateRecommendations(buildRecommendationInput(out)))
+		applyScoresV2_4(&out, analysis.Mode)
+		return out, validateNormalized(out)
 	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_3"):
 		var parsed AnalysisResultV2_3
 		if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -400,6 +451,137 @@ func normalizeFromV2_3(r AnalysisResultV2_3, analysis Analysis) NormalizedAnalys
 	}
 }
 
+func normalizeFromV2_4(r AnalysisResultV2_4, analysis Analysis) NormalizedAnalysisResult {
+	out := normalizeFromV2_3(AnalysisResultV2_3{
+		Meta:               r.Meta,
+		Summary:            r.Summary,
+		ATS:                r.ATS,
+		Issues:             r.Issues,
+		BulletRewrites:     r.BulletRewrites,
+		MissingInformation: r.MissingInformation,
+		ActionPlan:         r.ActionPlan,
+	}, analysis)
+	out.JobRequirementProfile = normalizeJobRequirementProfileV1(r.JobRequirementProfile)
+	out.JobMatchScoring = normalizeJobMatchScoringV1(r.JobMatchScoring)
+	out.AIScreening = normalizeAIScreeningV1(r.AIScreening)
+	out.FixThisFirst = normalizeFixThisFirstV1(r.FixThisFirst)
+	if len(out.FixThisFirst) == 0 {
+		out.FixThisFirst = BuildFixThisFirst(out.JobRequirementProfile, out.JobMatchScoring)
+	}
+	if len(out.FixThisFirst) > 3 {
+		out.FixThisFirst = out.FixThisFirst[:3]
+	}
+	return out
+}
+
+func normalizeJobRequirementProfileV1(profile JobRequirementProfileV1) JobRequirementProfileV1 {
+	profile.PrimaryRole = strings.TrimSpace(profile.PrimaryRole)
+	profile.Seniority = strings.TrimSpace(profile.Seniority)
+	profile.RoleType = strings.TrimSpace(profile.RoleType)
+	profile.RecruiterIntentSummary = strings.TrimSpace(profile.RecruiterIntentSummary)
+	if profile.TopPriorities == nil {
+		profile.TopPriorities = []JobPriorityV1{}
+	}
+	for i := range profile.TopPriorities {
+		profile.TopPriorities[i].ID = strings.TrimSpace(profile.TopPriorities[i].ID)
+		profile.TopPriorities[i].Priority = strings.TrimSpace(profile.TopPriorities[i].Priority)
+		profile.TopPriorities[i].Importance = strings.TrimSpace(profile.TopPriorities[i].Importance)
+		profile.TopPriorities[i].EvidenceExpected = strings.TrimSpace(profile.TopPriorities[i].EvidenceExpected)
+		profile.TopPriorities[i].ResumeMatchStatus = strings.TrimSpace(profile.TopPriorities[i].ResumeMatchStatus)
+		profile.TopPriorities[i].WhyItMatters = strings.TrimSpace(profile.TopPriorities[i].WhyItMatters)
+	}
+	if profile.HiddenExpectations == nil {
+		profile.HiddenExpectations = []HiddenExpectationV1{}
+	}
+	for i := range profile.HiddenExpectations {
+		profile.HiddenExpectations[i].ID = strings.TrimSpace(profile.HiddenExpectations[i].ID)
+		profile.HiddenExpectations[i].Expectation = strings.TrimSpace(profile.HiddenExpectations[i].Expectation)
+		profile.HiddenExpectations[i].ResumeMatchStatus = strings.TrimSpace(profile.HiddenExpectations[i].ResumeMatchStatus)
+		profile.HiddenExpectations[i].WhyItMatters = strings.TrimSpace(profile.HiddenExpectations[i].WhyItMatters)
+	}
+	if profile.NiceToHaveSignals == nil {
+		profile.NiceToHaveSignals = []NiceToHaveSignalV1{}
+	}
+	for i := range profile.NiceToHaveSignals {
+		profile.NiceToHaveSignals[i].ID = strings.TrimSpace(profile.NiceToHaveSignals[i].ID)
+		profile.NiceToHaveSignals[i].Signal = strings.TrimSpace(profile.NiceToHaveSignals[i].Signal)
+		profile.NiceToHaveSignals[i].ResumeMatchStatus = strings.TrimSpace(profile.NiceToHaveSignals[i].ResumeMatchStatus)
+		profile.NiceToHaveSignals[i].WhyItMatters = strings.TrimSpace(profile.NiceToHaveSignals[i].WhyItMatters)
+	}
+	return profile
+}
+
+func normalizeJobMatchScoringV1(scoring JobMatchScoringV1) JobMatchScoringV1 {
+	scoring.ScoringStrategy = strings.TrimSpace(scoring.ScoringStrategy)
+	scoring.Explanation = strings.TrimSpace(scoring.Explanation)
+	if scoring.RequirementScores == nil {
+		scoring.RequirementScores = []RequirementScoreV1{}
+	}
+	for i := range scoring.RequirementScores {
+		scoring.RequirementScores[i].RequirementID = strings.TrimSpace(scoring.RequirementScores[i].RequirementID)
+		scoring.RequirementScores[i].Requirement = strings.TrimSpace(scoring.RequirementScores[i].Requirement)
+		scoring.RequirementScores[i].MatchStatus = strings.TrimSpace(scoring.RequirementScores[i].MatchStatus)
+		scoring.RequirementScores[i].Evidence = strings.TrimSpace(scoring.RequirementScores[i].Evidence)
+		scoring.RequirementScores[i].Gap = strings.TrimSpace(scoring.RequirementScores[i].Gap)
+		scoring.RequirementScores[i].Score = clampScore(scoring.RequirementScores[i].Score)
+		scoring.RequirementScores[i].WeightedContribution = scoring.RequirementScores[i].Score * scoring.RequirementScores[i].Weight / 100
+	}
+	scoring.Score = CalculateJobMatchScore(scoring)
+	return scoring
+}
+
+func normalizeAIScreeningV1(screening AIScreeningV1) AIScreeningV1 {
+	screening.Verdict.Tier = strings.TrimSpace(screening.Verdict.Tier)
+	screening.Verdict.Title = strings.TrimSpace(screening.Verdict.Title)
+	screening.Verdict.Summary = strings.TrimSpace(screening.Verdict.Summary)
+	screening.Verdict.ScreeningRisk = strings.TrimSpace(screening.Verdict.ScreeningRisk)
+	if screening.ScoreBreakdown == nil {
+		screening.ScoreBreakdown = []AIScreeningBreakdownItemV1{}
+	}
+	for i := range screening.ScoreBreakdown {
+		screening.ScoreBreakdown[i].ID = strings.TrimSpace(screening.ScoreBreakdown[i].ID)
+		screening.ScoreBreakdown[i].Label = strings.TrimSpace(screening.ScoreBreakdown[i].Label)
+		screening.ScoreBreakdown[i].Score = clampScore(screening.ScoreBreakdown[i].Score)
+		screening.ScoreBreakdown[i].Status = strings.TrimSpace(screening.ScoreBreakdown[i].Status)
+		screening.ScoreBreakdown[i].Explanation = strings.TrimSpace(screening.ScoreBreakdown[i].Explanation)
+		screening.ScoreBreakdown[i].ImprovementFocus = strings.TrimSpace(screening.ScoreBreakdown[i].ImprovementFocus)
+	}
+	screening.AIRecruiterVerdict.OneLineVerdict = strings.TrimSpace(screening.AIRecruiterVerdict.OneLineVerdict)
+	screening.AIRecruiterVerdict.MainConcern = strings.TrimSpace(screening.AIRecruiterVerdict.MainConcern)
+	screening.AIRecruiterVerdict.StrongestSignal = strings.TrimSpace(screening.AIRecruiterVerdict.StrongestSignal)
+	screening.AIRecruiterVerdict.WeakestSignal = strings.TrimSpace(screening.AIRecruiterVerdict.WeakestSignal)
+	screening.Score = CalculateAIScreeningScore(screening)
+	screening.Verdict.Tier = ResolveAIScreeningTier(screening.Score)
+	screening.Verdict.ScreeningRisk = ResolveAIScreeningRisk(screening.Score)
+	return screening
+}
+
+func normalizeFixThisFirstV1(items []FixThisFirstItemV1) []FixThisFirstItemV1 {
+	if items == nil {
+		return []FixThisFirstItemV1{}
+	}
+	out := make([]FixThisFirstItemV1, 0, len(items))
+	for _, item := range items {
+		item.Title = strings.TrimSpace(item.Title)
+		item.Why = strings.TrimSpace(item.Why)
+		item.LinkedRequirementID = strings.TrimSpace(item.LinkedRequirementID)
+		item.ExpectedImpact = strings.TrimSpace(item.ExpectedImpact)
+		item.Effort = strings.TrimSpace(item.Effort)
+		item.Action = strings.TrimSpace(item.Action)
+		if item.Priority < 1 || item.Priority > 5 {
+			continue
+		}
+		if item.Title == "" || item.Action == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) > 3 {
+		return out[:3]
+	}
+	return out
+}
+
 func normalizeMeta(meta MetaV2, analysis Analysis) MetaV2 {
 	meta.PromptVersion = fallbackString(meta.PromptVersion, analysis.PromptVersion)
 	meta.Model = fallbackString(meta.Model, analysis.Model)
@@ -482,6 +664,26 @@ func applyScores(out *NormalizedAnalysisResult, mode AnalysisMode, matchScore *f
 	}
 }
 
+func applyScoresV2_4(out *NormalizedAnalysisResult, mode AnalysisMode) {
+	if out == nil {
+		return
+	}
+	if mode == "" {
+		mode = ModeJobMatch
+	}
+	switch mode {
+	case ModeATS:
+		out.MatchScore = 0
+		out.FinalScore = clampScore(out.ATS.Score)
+	case ModeJobMatch:
+		out.MatchScore = clampScore(out.JobMatchScoring.Score)
+		out.FinalScore = out.MatchScore
+	default:
+		out.MatchScore = clampScore(out.JobMatchScoring.Score)
+		out.FinalScore = out.MatchScore
+	}
+}
+
 func calculateMatchScore(missingJDKeywords []string) float64 {
 	missing := len(ensureStringSlice(missingJDKeywords))
 	if missing <= 0 {
@@ -502,6 +704,55 @@ func buildRecommendationInput(out NormalizedAnalysisResult) recommendations.Inpu
 			Suggestion:   issue.Suggestion,
 		})
 	}
+	jobPriorities := make([]recommendations.JobPriorityInput, 0, len(out.JobRequirementProfile.TopPriorities))
+	for _, item := range out.JobRequirementProfile.TopPriorities {
+		jobPriorities = append(jobPriorities, recommendations.JobPriorityInput{
+			ID:                item.ID,
+			Priority:          item.Priority,
+			Importance:        item.Importance,
+			Weight:            item.Weight,
+			EvidenceExpected:  item.EvidenceExpected,
+			ResumeMatchStatus: item.ResumeMatchStatus,
+			WhyItMatters:      item.WhyItMatters,
+		})
+	}
+	requirementScores := make([]recommendations.RequirementScoreInput, 0, len(out.JobMatchScoring.RequirementScores))
+	for _, item := range out.JobMatchScoring.RequirementScores {
+		requirementScores = append(requirementScores, recommendations.RequirementScoreInput{
+			RequirementID: item.RequirementID,
+			Requirement:   item.Requirement,
+			Weight:        item.Weight,
+			Score:         item.Score,
+			MatchStatus:   item.MatchStatus,
+			Evidence:      item.Evidence,
+			Gap:           item.Gap,
+		})
+	}
+	aiBreakdown := make([]recommendations.AIScreeningBreakdownInput, 0, len(out.AIScreening.ScoreBreakdown))
+	for _, item := range out.AIScreening.ScoreBreakdown {
+		aiBreakdown = append(aiBreakdown, recommendations.AIScreeningBreakdownInput{
+			ID:               item.ID,
+			Label:            item.Label,
+			Score:            item.Score,
+			Weight:           item.Weight,
+			Status:           item.Status,
+			Explanation:      item.Explanation,
+			ImprovementFocus: item.ImprovementFocus,
+		})
+	}
+	fixThisFirst := make([]recommendations.FixThisFirstInput, 0, len(out.FixThisFirst))
+	for _, item := range out.FixThisFirst {
+		fixThisFirst = append(fixThisFirst, recommendations.FixThisFirstInput{
+			Priority:            item.Priority,
+			Title:               item.Title,
+			Why:                 item.Why,
+			LinkedRequirementID: item.LinkedRequirementID,
+			ExpectedImpact:      item.ExpectedImpact,
+			Effort:              item.Effort,
+			Action:              item.Action,
+			RequiresUserInput:   item.RequiresUserInput,
+		})
+	}
 	actionPlan := recommendations.ActionPlan{
 		QuickWins:    ensureStringSlice(out.ActionPlan.QuickWins),
 		MediumEffort: ensureStringSlice(out.ActionPlan.MediumEffort),
@@ -514,6 +765,10 @@ func buildRecommendationInput(out NormalizedAnalysisResult) recommendations.Inpu
 		FormattingIssues:     ensureStringSlice(out.ATS.FormattingIssues),
 		ActionPlan:           actionPlan,
 		MissingInformation:   ensureStringSlice(out.MissingInformation),
+		JobPriorities:        jobPriorities,
+		RequirementScores:    requirementScores,
+		AIScreeningBreakdown: aiBreakdown,
+		FixThisFirst:         fixThisFirst,
 	}
 }
 

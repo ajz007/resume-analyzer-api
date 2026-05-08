@@ -1,0 +1,281 @@
+{
+  "meta": {
+    "promptVersion": "v2_4",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": true,
+    "confidence": 0.8,
+    "assumptions": [],
+    "limitations": [],
+    "mode": "JOB_MATCH",
+    "primaryScoreType": "JOB_MATCH"
+  },
+  "summary": {
+    "overallAssessment": "Strong match for backend platform work.",
+    "strengths": ["Backend ownership", "Measurable impact"],
+    "weaknesses": ["Could add more scale details"]
+  },
+  "ats": {
+    "score": 82,
+    "scoreBreakdown": {
+      "skills": 25,
+      "experience": 25,
+      "impact": 20,
+      "formatting": 15,
+      "roleFit": 15
+    },
+    "scoreReasoning": [
+      "Core backend skills are clear.",
+      "Experience aligns with the target role.",
+      "Impact is present but can be sharper."
+    ],
+    "scoreExplanation": {
+      "components": [
+        {
+          "key": "atsReadability",
+          "label": "ATS Readability",
+          "score": 80,
+          "weight": 25,
+          "explanation": "Clear headings and parseable structure.",
+          "helped": ["Standard section titles"],
+          "dragged": ["Dense bullets"]
+        },
+        {
+          "key": "skillMatch",
+          "label": "Skill Match",
+          "score": 85,
+          "weight": 30,
+          "explanation": "Backend skills match the role.",
+          "helped": ["Go", "AWS"],
+          "dragged": ["Few queueing details"]
+        },
+        {
+          "key": "experienceRelevance",
+          "label": "Experience Relevance",
+          "score": 82,
+          "weight": 30,
+          "explanation": "Recent experience fits the job.",
+          "helped": ["API ownership"],
+          "dragged": ["Limited system scale evidence"]
+        },
+        {
+          "key": "resumeStructure",
+          "label": "Resume Structure",
+          "score": 78,
+          "weight": 15,
+          "explanation": "Sections are easy to scan.",
+          "helped": ["Concise layout"],
+          "dragged": ["Some bullets lack metrics"]
+        }
+      ]
+    },
+    "missingKeywords": {
+      "fromJobDescription": ["SQS"],
+      "industryCommon": ["observability"]
+    },
+    "formattingIssues": []
+  },
+  "issues": [
+    {
+      "severity": "medium",
+      "section": "Experience",
+      "problem": "Scale is not always quantified.",
+      "whyItMatters": "Backend roles look for operating context.",
+      "suggestion": "Add request volume or latency where available.",
+      "evidence": "notFound",
+      "fixEffort": "medium",
+      "priority": 2,
+      "autoFixable": false,
+      "requiresUserInput": ["metrics"]
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "Experience",
+      "before": "Built APIs.",
+      "after": "Built Go APIs serving X requests per day.",
+      "rationale": "Adds clearer scope with a user-provided metric. Replace placeholders before final submission.",
+      "metricsSource": "placeholder",
+      "placeholdersNeeded": ["request_volume"],
+      "claimSupport": "placeholder",
+      "evidence": "notFound"
+    }
+  ],
+  "missingInformation": ["request volume"],
+  "actionPlan": {
+    "quickWins": ["Add SQS keyword where relevant."],
+    "mediumEffort": ["Quantify backend scale."],
+    "deepFixes": ["Add architecture context to key projects."]
+  },
+  "jobRequirementProfile": {
+    "isApplicable": true,
+    "primaryRole": "Backend Engineer",
+    "seniority": "SENIOR",
+    "roleType": "BACKEND",
+    "recruiterIntentSummary": "Hiring for backend ownership in Go and AWS.",
+    "topPriorities": [
+      {
+        "id": "req_backend_go",
+        "priority": "Go backend services",
+        "importance": "CRITICAL",
+        "weight": 40,
+        "evidenceExpected": "Recent Go service ownership.",
+        "resumeMatchStatus": "STRONG",
+        "whyItMatters": "The role centers on backend delivery."
+      },
+      {
+        "id": "req_aws",
+        "priority": "AWS production experience",
+        "importance": "HIGH",
+        "weight": 35,
+        "evidenceExpected": "AWS services used in production.",
+        "resumeMatchStatus": "PARTIAL",
+        "whyItMatters": "The team runs services on AWS."
+      },
+      {
+        "id": "req_impact",
+        "priority": "Measured operational impact",
+        "importance": "MEDIUM",
+        "weight": 25,
+        "evidenceExpected": "Latency, reliability, or scale metrics.",
+        "resumeMatchStatus": "WEAK",
+        "whyItMatters": "Metrics prove senior-level outcomes."
+      }
+    ],
+    "hiddenExpectations": [
+      {
+        "id": "hidden_ownership",
+        "expectation": "Own services beyond implementation.",
+        "resumeMatchStatus": "PARTIAL",
+        "whyItMatters": "Senior engineers are screened for ownership."
+      }
+    ],
+    "niceToHaveSignals": [
+      {
+        "id": "nice_observability",
+        "signal": "Observability experience",
+        "resumeMatchStatus": "UNKNOWN",
+        "whyItMatters": "It supports production readiness."
+      }
+    ]
+  },
+  "jobMatchScoring": {
+    "score": 99,
+    "scoringStrategy": "JD_WEIGHTED",
+    "requirementScores": [
+      {
+        "requirementId": "req_backend_go",
+        "requirement": "Go backend services",
+        "weight": 40,
+        "score": 90,
+        "weightedContribution": 1,
+        "matchStatus": "STRONG",
+        "evidence": "Built Go APIs in recent backend role.",
+        "gap": ""
+      },
+      {
+        "requirementId": "req_aws",
+        "requirement": "AWS production experience",
+        "weight": 35,
+        "score": 70,
+        "weightedContribution": 1,
+        "matchStatus": "PARTIAL",
+        "evidence": "AWS is listed but services are sparse.",
+        "gap": "Name relevant AWS services."
+      },
+      {
+        "requirementId": "req_impact",
+        "requirement": "Measured operational impact",
+        "weight": 25,
+        "score": 70,
+        "weightedContribution": 1,
+        "matchStatus": "PARTIAL",
+        "evidence": "Some impact metrics are present.",
+        "gap": "Add scale or reliability numbers."
+      }
+    ],
+    "explanation": "Strong backend match with some AWS and metrics gaps."
+  },
+  "aiScreening": {
+    "score": 100,
+    "verdict": {
+      "tier": "STRONG",
+      "title": "Likely to pass initial screening",
+      "summary": "Relevant backend experience with fixable evidence gaps.",
+      "screeningRisk": "LOW"
+    },
+    "scoreBreakdown": [
+      {
+        "id": "semantic_relevance",
+        "label": "Semantic Relevance",
+        "score": 85,
+        "weight": 25,
+        "status": "STRONG",
+        "explanation": "Experience matches backend work.",
+        "improvementFocus": "Add SQS details."
+      },
+      {
+        "id": "role_intent_alignment",
+        "label": "Role Intent Alignment",
+        "score": 80,
+        "weight": 20,
+        "status": "OK",
+        "explanation": "Resume points toward backend roles.",
+        "improvementFocus": "Clarify target title."
+      },
+      {
+        "id": "evidence_strength",
+        "label": "Evidence Strength",
+        "score": 75,
+        "weight": 20,
+        "status": "OK",
+        "explanation": "Evidence is present but uneven.",
+        "improvementFocus": "Add production examples."
+      },
+      {
+        "id": "impact_strength",
+        "label": "Impact Strength",
+        "score": 75,
+        "weight": 15,
+        "status": "OK",
+        "explanation": "Impact is credible but light.",
+        "improvementFocus": "Add metrics."
+      },
+      {
+        "id": "signal_density",
+        "label": "Signal Density",
+        "score": 80,
+        "weight": 10,
+        "status": "OK",
+        "explanation": "Relevant keywords appear often enough.",
+        "improvementFocus": "Remove generic bullets."
+      },
+      {
+        "id": "clarity_specificity",
+        "label": "Clarity Specificity",
+        "score": 85,
+        "weight": 10,
+        "status": "STRONG",
+        "explanation": "Most bullets are clear.",
+        "improvementFocus": "Tighten vague wording."
+      }
+    ],
+    "aiRecruiterVerdict": {
+      "oneLineVerdict": "Good backend candidate with evidence gaps.",
+      "mainConcern": "AWS depth is not specific enough.",
+      "strongestSignal": "Recent Go backend ownership.",
+      "weakestSignal": "Limited production scale metrics."
+    }
+  },
+  "fixThisFirst": [
+    {
+      "priority": 1,
+      "title": "Add AWS service evidence",
+      "why": "It closes a high-weight requirement gap.",
+      "linkedRequirementId": "req_aws",
+      "expectedImpact": "HIGH",
+      "effort": "LOW",
+      "action": "Name the AWS services used in recent backend work.",
+      "requiresUserInput": true
+    }
+  ]
+}

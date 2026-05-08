@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "promptVersion": "v2_4",
+    "model": "gpt-5-mini",
+    "jobDescriptionProvided": false,
+    "confidence": 0.75,
+    "assumptions": [],
+    "limitations": [],
+    "mode": "ATS",
+    "primaryScoreType": "ATS"
+  },
+  "summary": {
+    "overallAssessment": "Clear resume with good ATS readability.",
+    "strengths": ["Readable structure"],
+    "weaknesses": ["Some impact evidence is light"]
+  },
+  "ats": {
+    "score": 82,
+    "scoreBreakdown": {"skills": 25, "experience": 25, "impact": 20, "formatting": 15, "roleFit": 15},
+    "scoreReasoning": ["Core skills are visible.", "Experience is easy to scan.", "Impact could be more specific."],
+    "scoreExplanation": {
+      "components": [
+        {"key": "atsReadability", "label": "ATS Readability", "score": 82, "weight": 25, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "skillMatch", "label": "Skill Match", "score": 80, "weight": 30, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "experienceRelevance", "label": "Experience Relevance", "score": 82, "weight": 30, "explanation": "x", "helped": ["a"], "dragged": ["b"]},
+        {"key": "resumeStructure", "label": "Resume Structure", "score": 84, "weight": 15, "explanation": "x", "helped": ["a"], "dragged": ["b"]}
+      ]
+    },
+    "missingKeywords": {"fromJobDescription": [], "industryCommon": ["observability"]},
+    "formattingIssues": []
+  },
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {"quickWins": [], "mediumEffort": [], "deepFixes": []},
+  "jobRequirementProfile": {
+    "isApplicable": false,
+    "primaryRole": "",
+    "seniority": "UNCLEAR",
+    "roleType": "UNCLEAR",
+    "recruiterIntentSummary": "",
+    "topPriorities": [],
+    "hiddenExpectations": [],
+    "niceToHaveSignals": []
+  },
+  "jobMatchScoring": {"score": 0, "scoringStrategy": "", "requirementScores": [], "explanation": ""},
+  "aiScreening": {
+    "score": 10,
+    "verdict": {"tier": "WEAK", "title": "Good screening readability", "summary": "Readable for screening.", "screeningRisk": "HIGH"},
+    "scoreBreakdown": [
+      {"id": "semantic_relevance", "label": "Semantic Relevance", "score": 80, "weight": 24, "status": "OK", "explanation": "Clear role signals.", "improvementFocus": "Clarify target title."},
+      {"id": "role_intent_alignment", "label": "Role Intent Alignment", "score": 75, "weight": 20, "status": "OK", "explanation": "Direction is clear.", "improvementFocus": "Add headline."},
+      {"id": "evidence_strength", "label": "Evidence Strength", "score": 70, "weight": 20, "status": "OK", "explanation": "Evidence is present.", "improvementFocus": "Add outcomes."},
+      {"id": "impact_strength", "label": "Impact Strength", "score": 70, "weight": 15, "status": "OK", "explanation": "Impact is credible.", "improvementFocus": "Add metrics."},
+      {"id": "signal_density", "label": "Signal Density", "score": 80, "weight": 10, "status": "OK", "explanation": "Terms are visible.", "improvementFocus": "Align skills."},
+      {"id": "clarity_specificity", "label": "Clarity Specificity", "score": 80, "weight": 10, "status": "OK", "explanation": "Content is clear.", "improvementFocus": "Tighten bullets."}
+    ],
+    "aiRecruiterVerdict": {"oneLineVerdict": "Readable resume.", "mainConcern": "Evidence.", "strongestSignal": "Structure.", "weakestSignal": "Metrics."}
+  },
+  "fixThisFirst": []
+}

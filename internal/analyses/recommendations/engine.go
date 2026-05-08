@@ -11,6 +11,15 @@ func GenerateRecommendations(input Input) []Recommendation {
 	candidates := make([]Recommendation, 0, 16)
 	mappers := []func(Input) []Recommendation{
 		func(in Input) []Recommendation {
+			return fromFixThisFirst(in.FixThisFirst)
+		},
+		func(in Input) []Recommendation {
+			return fromWeakCriticalRequirements(in.RequirementScores)
+		},
+		func(in Input) []Recommendation {
+			return fromAIScreeningWeaknesses(in.AIScreeningBreakdown)
+		},
+		func(in Input) []Recommendation {
 			return fromIssues(in.Issues)
 		},
 		func(in Input) []Recommendation {
@@ -65,6 +74,10 @@ func impactRank(value string) int {
 
 func categoryRank(value string) int {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "JOB_FIT":
+		return 7
+	case "AI_SCREENING":
+		return 6
 	case "ATS":
 		return 5
 	case "SKILLS":

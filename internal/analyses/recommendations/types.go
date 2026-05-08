@@ -28,6 +28,47 @@ type ActionPlan struct {
 	DeepFixes    []string
 }
 
+type JobPriorityInput struct {
+	ID                string
+	Priority          string
+	Importance        string
+	Weight            float64
+	EvidenceExpected  string
+	ResumeMatchStatus string
+	WhyItMatters      string
+}
+
+type RequirementScoreInput struct {
+	RequirementID string
+	Requirement   string
+	Weight        float64
+	Score         float64
+	MatchStatus   string
+	Evidence      string
+	Gap           string
+}
+
+type AIScreeningBreakdownInput struct {
+	ID               string
+	Label            string
+	Score            float64
+	Weight           float64
+	Status           string
+	Explanation      string
+	ImprovementFocus string
+}
+
+type FixThisFirstInput struct {
+	Priority            int
+	Title               string
+	Why                 string
+	LinkedRequirementID string
+	ExpectedImpact      string
+	Effort              string
+	Action              string
+	RequiresUserInput   bool
+}
+
 // Input is the normalized data needed for recommendation generation.
 type Input struct {
 	Issues               []Issue
@@ -36,4 +77,8 @@ type Input struct {
 	FormattingIssues     []string
 	ActionPlan           ActionPlan
 	MissingInformation   []string
+	JobPriorities        []JobPriorityInput
+	RequirementScores    []RequirementScoreInput
+	AIScreeningBreakdown []AIScreeningBreakdownInput
+	FixThisFirst         []FixThisFirstInput
 }

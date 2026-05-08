@@ -1,8 +1,12 @@
 package analyses
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"resume-backend/internal/llm"
 )
 
 func TestValidateContentV2_2RejectsUnsupportedClaim(t *testing.T) {
@@ -171,5 +175,73 @@ func TestSanitizeBulletRewriteTermsNoChange(t *testing.T) {
 	changed, _ := sanitizeBulletRewriteTerms(&r)
 	if changed {
 		t.Fatalf("expected sanitizer to leave bullet rewrite unchanged")
+	}
+}
+
+func TestValidateV2_4WithRetryAcceptsValidOutput(t *testing.T) {
+	payload, err := json.Marshal(validAnalysisResultV2_4())
+	if err != nil {
+		t.Fatalf("marshal valid v2_4: %v", err)
+	}
+
+	raw, err := ValidateV2_4WithRetry(context.Background(), staticLLMResponse{resp: string(payload)}, llm.AnalyzeInput{PromptVersion: "v2_4"})
+	if err != nil {
+		t.Fatalf("expected valid v2_4 output to pass, got %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatalf("expected raw output")
+	}
+}
+
+func TestValidateContentV2_4RejectsHardGuaranteePhrases(t *testing.T) {
+	out := validAnalysisResultV2_4()
+	out.AIScreening.Verdict.Summary = "This resume will pass AI filter for the role."
+
+	if err := ValidateContentV2_4(&out); err == nil {
+		t.Fatalf("expected hard guarantee phrase to fail")
+	}
+}
+
+type sequenceLLMResponse struct {
+	calls int
+	resp  []string
+}
+
+func (s *sequenceLLMResponse) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.RawMessage, error) {
+	_ = ctx
+	_ = input
+	if s.calls >= len(s.resp) {
+		s.calls++
+		return json.RawMessage(s.resp[len(s.resp)-1]), nil
+	}
+	resp := s.resp[s.calls]
+	s.calls++
+	return json.RawMessage(resp), nil
+}
+
+func TestValidateV2_4WithRetryPathWorks(t *testing.T) {
+	first := validAnalysisResultV2_4()
+	first.JobMatchScoring.Explanation = "This is a guaranteed shortlist after edits."
+	firstPayload, err := json.Marshal(first)
+	if err != nil {
+		t.Fatalf("marshal first v2_4: %v", err)
+	}
+	second := validAnalysisResultV2_4()
+	second.JobMatchScoring.Explanation = "Strong shortlist readiness after edits."
+	secondPayload, err := json.Marshal(second)
+	if err != nil {
+		t.Fatalf("marshal second v2_4: %v", err)
+	}
+	mock := &sequenceLLMResponse{resp: []string{string(firstPayload), string(secondPayload)}}
+
+	raw, err := ValidateV2_4WithRetry(context.Background(), mock, llm.AnalyzeInput{PromptVersion: "v2_4"})
+	if err != nil {
+		t.Fatalf("expected retry to pass, got %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatalf("expected raw retry output")
+	}
+	if mock.calls != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", mock.calls)
 	}
 }

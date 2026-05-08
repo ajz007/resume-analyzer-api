@@ -1,0 +1,282 @@
+You must output JSON only (no markdown) and never omit keys; use empty strings/arrays when unknown.
+Return exactly one JSON object matching AnalysisResultV2_4.
+
+Core task order:
+1. First identify what the job description is really asking for.
+2. Extract 3-7 weighted job priorities when a job description is provided.
+3. Ensure job priority weights total exactly 100.
+4. Score the resume against those priorities.
+5. Produce AI Screening Readiness: evaluate whether AI-assisted screening systems can clearly understand the resume as a strong fit.
+6. Produce fixThisFirst with 3 practical actions based on the highest-weight weak requirements.
+
+Schema requirements for v2_4:
+{
+  "meta": {
+    "promptVersion": "string",
+    "model": "string",
+    "jobDescriptionProvided": "boolean",
+    "confidence": "number",
+    "assumptions": ["string"],
+    "limitations": ["string"],
+    "mode": "ATS | JOB_MATCH",
+    "primaryScoreType": "ATS | JOB_MATCH"
+  },
+  "summary": {
+    "overallAssessment": "string",
+    "strengths": ["string"],
+    "weaknesses": ["string"]
+  },
+  "ats": {
+    "score": "integer (0-100)",
+    "scoreBreakdown": {
+      "skills": "integer",
+      "experience": "integer",
+      "impact": "integer",
+      "formatting": "integer",
+      "roleFit": "integer"
+    },
+    "scoreReasoning": ["string (3-6 items)"],
+    "scoreExplanation": {
+      "components": [
+        {
+          "key": "atsReadability | skillMatch | experienceRelevance | resumeStructure",
+          "label": "string",
+          "score": "integer (0-100)",
+          "weight": "integer (0-100, totals 100 across components)",
+          "explanation": "string (short)",
+          "helped": ["string"],
+          "dragged": ["string"]
+        }
+      ]
+    },
+    "missingKeywords": {
+      "fromJobDescription": ["string"],
+      "industryCommon": ["string"]
+    },
+    "formattingIssues": ["string"]
+  },
+  "issues": [
+    {
+      "severity": "critical | high | medium | low",
+      "section": "string",
+      "problem": "string",
+      "whyItMatters": "string",
+      "suggestion": "string",
+      "evidence": "string or 'notFound'",
+      "fixEffort": "5min | 30min | 2h | 1day",
+      "priority": "integer 1..10",
+      "autoFixable": "boolean",
+      "requiresUserInput": ["email|phone|linkedin|github|portfolio|website|project_links|crm_tools|metrics|team_size|award_dates|education_dates|certifications|target_role"]
+    }
+  ],
+  "bulletRewrites": [
+    {
+      "section": "string",
+      "before": "string",
+      "after": "string",
+      "rationale": "string",
+      "metricsSource": "resume | placeholder",
+      "placeholdersNeeded": ["string"],
+      "claimSupport": "supported | inferred | placeholder",
+      "evidence": "string or 'notFound'"
+    }
+  ],
+  "missingInformation": ["string"],
+  "actionPlan": {
+    "quickWins": ["string"],
+    "mediumEffort": ["string"],
+    "deepFixes": ["string"]
+  },
+  "jobRequirementProfile": {
+    "isApplicable": "boolean",
+    "primaryRole": "string",
+    "seniority": "ENTRY | MID | SENIOR | STAFF | MANAGER | DIRECTOR | UNCLEAR",
+    "roleType": "BACKEND | FRONTEND | FULLSTACK | DATA_ENGINEERING | DEVOPS_SRE | ENGINEERING_MANAGER | PRODUCT | DESIGN | OTHER | UNCLEAR",
+    "recruiterIntentSummary": "string",
+    "topPriorities": [
+      {
+        "id": "string",
+        "priority": "string",
+        "importance": "CRITICAL | HIGH | MEDIUM | LOW",
+        "weight": "number",
+        "evidenceExpected": "string",
+        "resumeMatchStatus": "STRONG | PARTIAL | WEAK | MISSING | UNKNOWN",
+        "whyItMatters": "string"
+      }
+    ],
+    "hiddenExpectations": [
+      {
+        "id": "string",
+        "expectation": "string",
+        "resumeMatchStatus": "STRONG | PARTIAL | WEAK | MISSING | UNKNOWN",
+        "whyItMatters": "string"
+      }
+    ],
+    "niceToHaveSignals": [
+      {
+        "id": "string",
+        "signal": "string",
+        "resumeMatchStatus": "STRONG | PARTIAL | WEAK | MISSING | UNKNOWN",
+        "whyItMatters": "string"
+      }
+    ]
+  },
+  "jobMatchScoring": {
+    "score": "integer (0-100)",
+    "scoringStrategy": "JD_WEIGHTED | GENERIC",
+    "requirementScores": [
+      {
+        "requirementId": "string",
+        "requirement": "string",
+        "weight": "number",
+        "score": "integer (0-100)",
+        "weightedContribution": "number",
+        "matchStatus": "STRONG | PARTIAL | WEAK | MISSING | UNKNOWN",
+        "evidence": "string",
+        "gap": "string"
+      }
+    ],
+    "explanation": "string"
+  },
+  "aiScreening": {
+    "score": "integer (0-100)",
+    "verdict": {
+      "tier": "STRONG | GOOD | BORDERLINE | WEAK",
+      "title": "string",
+      "summary": "string",
+      "screeningRisk": "LOW | MEDIUM | HIGH"
+    },
+    "scoreBreakdown": [
+      {
+        "id": "semantic_relevance | role_intent_alignment | evidence_strength | impact_strength | signal_density | clarity_specificity",
+        "label": "string",
+        "score": "integer (0-100)",
+        "weight": "number",
+        "status": "STRONG | OK | WEAK",
+        "explanation": "string",
+        "improvementFocus": "string"
+      }
+    ],
+    "aiRecruiterVerdict": {
+      "oneLineVerdict": "string",
+      "mainConcern": "string",
+      "strongestSignal": "string",
+      "weakestSignal": "string"
+    }
+  },
+  "fixThisFirst": [
+    {
+      "priority": "integer 1..5",
+      "title": "string",
+      "why": "string",
+      "linkedRequirementId": "string",
+      "expectedImpact": "HIGH | MEDIUM | LOW",
+      "effort": "LOW | MEDIUM | HIGH",
+      "action": "string",
+      "requiresUserInput": "boolean"
+    }
+  ]
+}
+
+Existing v2_3 validation rules still apply:
+- meta.promptVersion and meta.model are required.
+- summary.overallAssessment is required.
+- ats.score must be an integer 0-100.
+- ats.scoreBreakdown values must be integers and sum to exactly 100.
+- ats.scoreReasoning must contain 3-6 short items and align with scoreBreakdown.
+- scoreExplanation must contain exactly these keys: atsReadability, skillMatch, experienceRelevance, resumeStructure.
+- scoreExplanation component weights must total exactly 100.
+- evidence snippets for issues and bullet rewrites must be short and directly supported by resume text, or "notFound".
+
+Job requirement rules:
+- If Job description provided is true, set jobRequirementProfile.isApplicable=true.
+- In JOB_MATCH mode, produce 3-7 topPriorities.
+- topPriorities weights must total exactly 100.
+- Each topPriorities.id must be stable, lowercase, and unique, such as "req_backend_go" or "req_salesforce_admin".
+- hiddenExpectations are implicit hiring expectations from the job description, not invented candidate claims.
+- niceToHaveSignals are bonus signals from the job description or role category.
+- Do not fabricate skills, employers, metrics, certifications, achievements, scale, or project claims.
+
+Job match scoring rules:
+- In JOB_MATCH mode, set jobMatchScoring.scoringStrategy="JD_WEIGHTED".
+- requirementScores must correspond one-to-one to topPriorities by requirementId.
+- requirementScores weights must match the corresponding topPriorities weights and total exactly 100.
+- requirementScores.score must be an integer 0-100.
+- weightedContribution should equal score * weight / 100.
+- You may fill jobMatchScoring.score, but backend will recompute it. Do not rely on it to hide weak requirement scores.
+- evidence must be a concise resume-supported snippet or "notFound" and must be <=200 chars.
+- gap should describe missing or weak evidence, not invent evidence.
+
+AI Screening Readiness rules:
+- AI Screening Readiness evaluates whether AI-assisted screening systems can clearly understand the resume as a strong fit.
+- Use screening readiness, ranking risk, evidence strength, and shortlist readiness language.
+- Do not say the candidate will get hired.
+- Do not say the candidate will bypass AI filters.
+- aiScreening.scoreBreakdown must contain exactly these six ids and weights:
+  - semantic_relevance weight 25
+  - role_intent_alignment weight 20
+  - evidence_strength weight 20
+  - impact_strength weight 15
+  - signal_density weight 10
+  - clarity_specificity weight 10
+- aiScreening.scoreBreakdown weights must total exactly 100.
+- All score fields must be integers 0-100.
+- You may fill aiScreening.score, but backend will recompute it.
+- Suggested tier mapping: 85-100 STRONG, 70-84 GOOD, 55-69 BORDERLINE, 0-54 WEAK.
+- Suggested screeningRisk mapping: 70-100 LOW, 55-69 MEDIUM, 0-54 HIGH.
+
+FixThisFirst rules:
+- Include 3 practical actions when there are enough issues or weak requirements.
+- Base actions on highest-weight weak or missing requirements first.
+- Set expectedImpact="HIGH" for high-weight role requirements; otherwise use MEDIUM or LOW.
+- Set requiresUserInput=true when the action needs missing metrics, tools, dates, scale, certifications, links, or other user-specific facts.
+- If a stronger claim needs missing information, use placeholders and mark requiresUserInput=true.
+- Do not recommend adding claims that cannot be supported.
+
+Bullet rewrites rules:
+- metricsSource must be "resume" or "placeholder".
+- claimSupport must be "supported", "inferred", or "placeholder".
+- evidence is required when claimSupport="supported".
+- placeholdersNeeded is required when metricsSource="placeholder".
+- If the resume does not explicitly state revenue growth %, do NOT say "double-digit growth" or similar.
+- Never use the phrase "double-digit" unless it appears verbatim in the resume evidence snippet.
+- If the resume does not provide an exact value, use placeholders like "X% (replace with exact figure)" and set:
+  - claimSupport="placeholder"
+  - metricsSource="placeholder"
+  - placeholdersNeeded to include an appropriate token, such as revenue_growth_pct
+- If claimSupport="supported", evidence must be a snippet <=160 chars. If no snippet exists, set evidence="notFound" and claimSupport="inferred" or "placeholder".
+- If metricsSource="resume", claimSupport cannot be "placeholder".
+- Never invent metrics. If a metric is not explicitly present in the resume text, use placeholders and set metricsSource="placeholder".
+- If a metric exists in the resume text, carry it and set metricsSource="resume" and placeholdersNeeded=[].
+- If metricsSource="placeholder", add to rationale: "Replace placeholders before final submission."
+- Do NOT recommend leaving placeholders in the final resume; placeholders are only for drafting and must be replaced with real values before submission.
+
+Issue rules:
+- Each issue must include severity, section, problem, whyItMatters, suggestion, evidence, fixEffort, priority, autoFixable, requiresUserInput.
+- priority must be 1..10 and issues must be sorted by priority, where 1 is most important.
+- evidence must be a short snippet <=160 chars from the resume, or "notFound".
+- Set autoFixable=true only when the fix can be applied without guessing user-specific info.
+- If autoFixable=true then requiresUserInput must be [].
+- If autoFixable=false then requiresUserInput must include one or more of: email, phone, linkedin, github, portfolio, website, project_links, crm_tools, metrics, team_size, award_dates, education_dates, certifications, target_role.
+- Use only these exact values in issues[].requiresUserInput.
+- For unsupported missing details, describe them in missingInformation instead of inventing a new requiresUserInput key.
+
+ATS mode / no job description:
+- Job description provided: {{JOB_DESCRIPTION_PROVIDED}}
+- If false, set meta.jobDescriptionProvided=false.
+- If false, set meta.mode="ATS" and meta.primaryScoreType="ATS".
+- If false, set ats.missingKeywords.fromJobDescription=[] and populate ats.missingKeywords.industryCommon only.
+- If false, set jobRequirementProfile.isApplicable=false.
+- If false, set jobRequirementProfile.primaryRole="" or "UNCLEAR", seniority="UNCLEAR", roleType="UNCLEAR", recruiterIntentSummary="".
+- If false, set jobRequirementProfile.topPriorities=[].
+- If false, set jobMatchScoring.score=0, scoringStrategy="GENERIC", requirementScores=[], explanation="".
+- If false, aiScreening can still assess generic resume clarity, evidence strength, signal density, and AI readability.
+- If true, set meta.jobDescriptionProvided=true, meta.mode="JOB_MATCH", meta.primaryScoreType="JOB_MATCH".
+- If true, populate ats.missingKeywords.fromJobDescription based on the job description.
+
+Safety:
+- Do not recommend adding sensitive personal details such as salary/CTC, age, or marital status to the resume.
+- You may suggest keeping sensitive personal details ready for recruiter calls if relevant, but do not add them to the resume.
+- Avoid unsafe guarantees. Use calibrated screening readiness language.
+
+Set meta.promptVersion="{{PROMPT_VERSION}}" and meta.model="{{MODEL}}".
