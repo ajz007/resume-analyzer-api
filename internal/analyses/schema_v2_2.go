@@ -134,9 +134,49 @@ func validateScoreBreakdownV2_2(b *ScoreBreakdownV2) error {
 
 func isAllowedUserInputKey(key string) bool {
 	switch key {
-	case "email", "phone", "linkedin", "crm_tools", "metrics", "team_size", "award_dates", "target_role":
+	case "email",
+		"phone",
+		"linkedin",
+		"github",
+		"portfolio",
+		"website",
+		"project_links",
+		"crm_tools",
+		"metrics",
+		"team_size",
+		"award_dates",
+		"education_dates",
+		"certifications",
+		"target_role":
 		return true
 	default:
 		return false
 	}
+}
+
+func normalizeUserInputKey(key string) (string, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(key))
+	normalized = strings.NewReplacer(" ", "_", "-", "_").Replace(normalized)
+
+	switch normalized {
+	case "github_url", "github_profile", "git_hub":
+		normalized = "github"
+	case "portfolio_url", "personal_portfolio":
+		normalized = "portfolio"
+	case "personal_website", "website_url":
+		normalized = "website"
+	case "project_link", "project_links_url", "repo", "repository", "repositories":
+		normalized = "project_links"
+	case "certification", "certificate", "certificates":
+		normalized = "certifications"
+	case "education_year", "graduation_year", "degree_year", "education_date":
+		normalized = "education_dates"
+	case "tools":
+		normalized = "crm_tools"
+	}
+
+	if isAllowedUserInputKey(normalized) {
+		return normalized, true
+	}
+	return "", false
 }

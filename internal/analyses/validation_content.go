@@ -381,10 +381,35 @@ func SanitizeV2_3(r *AnalysisResultV2_3) {
 	}
 	for i := range r.Issues {
 		r.Issues[i].Evidence = sanitizeEvidence(r.Issues[i].Evidence, 160)
+		r.Issues[i].RequiresUserInput = sanitizeIssueRequiresUserInput(
+			r.Issues[i].RequiresUserInput,
+			r.Issues[i].AutoFixable,
+		)
 	}
 	for i := range r.BulletRewrites {
 		r.BulletRewrites[i].Evidence = sanitizeEvidence(r.BulletRewrites[i].Evidence, 160)
 	}
+}
+
+func sanitizeIssueRequiresUserInput(values []string, autoFixable bool) []string {
+	if autoFixable {
+		return []string{}
+	}
+	if values == nil {
+		return []string{}
+	}
+
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized, ok := normalizeUserInputKey(value)
+		if !ok || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
 }
 
 // SanitizeV2_4 trims and normalizes display-only fields before content validation.
