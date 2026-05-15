@@ -193,6 +193,122 @@ func TestValidateV2_4WithRetryAcceptsValidOutput(t *testing.T) {
 	}
 }
 
+func TestValidateV2_4WithRetryRecoversScoreExplanationArrays(t *testing.T) {
+	out := validAnalysisResultV2_4()
+	out.Summary.Strengths = []string{" Backend ownership ", "", "Backend ownership"}
+	out.ATS.ScoreExplanation.Components[0].Helped = []string{}
+	out.ATS.ScoreExplanation.Components[0].Dragged = []string{"", "Dense bullets", "Dense bullets"}
+	out.ATS.ScoreExplanation.Components[1].Helped = nil
+	out.ATS.ScoreExplanation.Components[1].Dragged = []string{" Few queueing details "}
+	out.JobRequirementProfile.HiddenExpectations = nil
+	out.JobRequirementProfile.NiceToHaveSignals = nil
+	payload, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal v2_4: %v", err)
+	}
+
+	raw, err := ValidateV2_4WithRetry(context.Background(), staticLLMResponse{resp: string(payload)}, llm.AnalyzeInput{PromptVersion: "v2_4"})
+	if err != nil {
+		t.Fatalf("expected recoverable v2_4 output to pass, got %v", err)
+	}
+
+	var got AnalysisResultV2_4
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal recovered payload: %v", err)
+	}
+	if got.ATS.ScoreExplanation.Components[0].Helped == nil || len(got.ATS.ScoreExplanation.Components[0].Helped) != 0 {
+		t.Fatalf("expected empty helped array to be preserved, got %#v", got.ATS.ScoreExplanation.Components[0].Helped)
+	}
+	if got.ATS.ScoreExplanation.Components[1].Helped == nil || len(got.ATS.ScoreExplanation.Components[1].Helped) != 0 {
+		t.Fatalf("expected nil helped array to normalize to empty array, got %#v", got.ATS.ScoreExplanation.Components[1].Helped)
+	}
+	if got.ATS.ScoreExplanation.Components[0].Dragged == nil || len(got.ATS.ScoreExplanation.Components[0].Dragged) != 1 || got.ATS.ScoreExplanation.Components[0].Dragged[0] != "Dense bullets" {
+		t.Fatalf("expected dragged items to be trimmed and deduplicated, got %#v", got.ATS.ScoreExplanation.Components[0].Dragged)
+	}
+	if got.Summary.Strengths == nil || len(got.Summary.Strengths) != 1 || got.Summary.Strengths[0] != "Backend ownership" {
+		t.Fatalf("expected summary strengths to be cleaned, got %#v", got.Summary.Strengths)
+	}
+	if got.JobRequirementProfile.HiddenExpectations == nil || got.JobRequirementProfile.NiceToHaveSignals == nil {
+		t.Fatalf("expected optional arrays to normalize to empty arrays")
+	}
+}
+
+func TestParseRecoverValidateV2_4ReportsWarnings(t *testing.T) {
+	out := validAnalysisResultV2_4()
+	out.ATS.ScoreExplanation.Components[0].Helped = []string{}
+	out.ATS.ScoreExplanation.Components[0].Dragged = []string{"", "Dense bullets"}
+	payload, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal v2_4: %v", err)
+	}
+
+	var parsed AnalysisResultV2_4
+	issues, err := parseRecoverValidateV2_4(payload, &parsed)
+	if err != nil {
+		t.Fatalf("expected validation to recover, got %v", err)
+	}
+	counts := countValidationIssuesBySeverity(issues)
+	if counts[ValidationWarning] == 0 {
+		t.Fatalf("expected warning issues, got %#v", issues)
+	}
+	if counts[ValidationRecoverable] == 0 {
+		t.Fatalf("expected recoverable issues, got %#v", issues)
+	}
+}
+
+func TestValidateV2_4WithRetryFailsMalformedJSON(t *testing.T) {
+	_, err := ValidateV2_4WithRetry(context.Background(), staticLLMResponse{resp: `{"meta":`}, llm.AnalyzeInput{PromptVersion: "v2_4"})
+	if err == nil {
+		t.Fatalf("expected malformed JSON to fail")
+	}
+}
+
+func TestValidateV2_4WithRetryFailsMissingATSSection(t *testing.T) {
+	out := validAnalysisResultV2_4()
+	payload, err := json.Marshal(struct {
+		Meta                  MetaV2                  `json:"meta"`
+		Summary               SummaryV1               `json:"summary"`
+		Issues                []IssueV2_2             `json:"issues"`
+		BulletRewrites        []BulletRewriteV2_3     `json:"bulletRewrites"`
+		MissingInformation    []string                `json:"missingInformation"`
+		ActionPlan            ActionPlanV1            `json:"actionPlan"`
+		JobRequirementProfile JobRequirementProfileV1 `json:"jobRequirementProfile"`
+		JobMatchScoring       JobMatchScoringV1       `json:"jobMatchScoring"`
+		AIScreening           AIScreeningV1           `json:"aiScreening"`
+		FixThisFirst          []FixThisFirstItemV1    `json:"fixThisFirst"`
+	}{
+		Meta:                  out.Meta,
+		Summary:               out.Summary,
+		Issues:                out.Issues,
+		BulletRewrites:        out.BulletRewrites,
+		MissingInformation:    out.MissingInformation,
+		ActionPlan:            out.ActionPlan,
+		JobRequirementProfile: out.JobRequirementProfile,
+		JobMatchScoring:       out.JobMatchScoring,
+		AIScreening:           out.AIScreening,
+		FixThisFirst:          out.FixThisFirst,
+	})
+	if err != nil {
+		t.Fatalf("marshal missing ats payload: %v", err)
+	}
+
+	if _, err := ValidateV2_4WithRetry(context.Background(), staticLLMResponse{resp: string(payload)}, llm.AnalyzeInput{PromptVersion: "v2_4"}); err == nil {
+		t.Fatalf("expected missing ATS section to fail")
+	}
+}
+
+func TestValidateV2_4WithRetryFailsInvalidScoreTotals(t *testing.T) {
+	out := validAnalysisResultV2_4()
+	out.ATS.ScoreBreakdown.RoleFit = 1
+	payload, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal v2_4: %v", err)
+	}
+	if _, err := ValidateV2_4WithRetry(context.Background(), staticLLMResponse{resp: string(payload)}, llm.AnalyzeInput{PromptVersion: "v2_4"}); err == nil {
+		t.Fatalf("expected invalid score totals to fail")
+	}
+}
+
 func TestValidateContentV2_4RejectsHardGuaranteePhrases(t *testing.T) {
 	out := validAnalysisResultV2_4()
 	out.AIScreening.Verdict.Summary = "This resume will pass AI filter for the role."

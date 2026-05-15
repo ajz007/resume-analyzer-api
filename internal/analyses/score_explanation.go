@@ -70,12 +70,6 @@ func validateScoreExplanationV1(e *ScoreExplanationV1) error {
 		if strings.TrimSpace(c.Explanation) == "" {
 			return fmt.Errorf("ats.scoreExplanation.components[%d].explanation is required", i)
 		}
-		if len(c.Helped) == 0 {
-			return fmt.Errorf("ats.scoreExplanation.components[%d].helped must have at least 1 item", i)
-		}
-		if len(c.Dragged) == 0 {
-			return fmt.Errorf("ats.scoreExplanation.components[%d].dragged must have at least 1 item", i)
-		}
 		for _, item := range c.Helped {
 			if strings.TrimSpace(item) == "" {
 				return fmt.Errorf("ats.scoreExplanation.components[%d].helped must not include empty items", i)
