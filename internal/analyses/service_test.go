@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +25,17 @@ type staticLLMResponse struct {
 func (s staticLLMResponse) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.RawMessage, error) {
 	_ = ctx
 	_ = input
+	return json.RawMessage(s.resp), nil
+}
+
+type captureLLMResponse struct {
+	resp  string
+	input llm.AnalyzeInput
+}
+
+func (s *captureLLMResponse) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.RawMessage, error) {
+	_ = ctx
+	s.input = input
 	return json.RawMessage(s.resp), nil
 }
 
@@ -157,6 +171,85 @@ func TestAnalysisCompletedTimestampSetOnSuccess(t *testing.T) {
 	}
 	if got.Status != StatusCompleted {
 		t.Fatalf("expected status completed, got %s", got.Status)
+	}
+}
+
+func TestProcessAnalysisReextractsBlankCachedText(t *testing.T) {
+	validV1 := `{
+  "summary": {"overallAssessment": "ok", "strengths": [], "weaknesses": []},
+  "ats": {"score": 80, "missingKeywords": [], "formattingIssues": []},
+  "issues": [],
+  "bulletRewrites": [],
+  "missingInformation": [],
+  "actionPlan": {"quickWins": [], "mediumEffort": [], "deepFixes": []}
+}`
+	store := local.New(t.TempDir())
+	saver, ok := store.(interface {
+		SaveWithKey(ctx context.Context, storageKey string, contentType string, r io.Reader) (int64, error)
+	})
+	if !ok {
+		t.Fatalf("local store must support SaveWithKey")
+	}
+	docxPath := filepath.Join("..", "..", "resume", "render", "testdata", "template.docx")
+	docxBytes, err := os.ReadFile(docxPath)
+	if err != nil {
+		t.Fatalf("read test docx: %v", err)
+	}
+	if _, err := saver.SaveWithKey(context.Background(), "original.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", bytes.NewReader(docxBytes)); err != nil {
+		t.Fatalf("save original docx: %v", err)
+	}
+	if _, err := saver.SaveWithKey(context.Background(), "original.docx.extracted.txt", "text/plain; charset=utf-8", strings.NewReader("")); err != nil {
+		t.Fatalf("save blank extracted text: %v", err)
+	}
+
+	llmClient := &captureLLMResponse{resp: validV1}
+	docRepo := documents.NewMemoryRepo()
+	analysisRepo := NewMemoryRepo()
+	doc := documents.Document{
+		ID:               "doc-blank-cache",
+		UserID:           "user-1",
+		FileName:         "resume.docx",
+		MimeType:         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		SizeBytes:        int64(len(docxBytes)),
+		StorageProvider:  "local",
+		StorageKey:       "original.docx",
+		ExtractedTextKey: "original.docx.extracted.txt",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := docRepo.Create(context.Background(), doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	svc := &Service{Repo: analysisRepo, DocRepo: docRepo, Store: store, LLM: llmClient}
+	analysis := Analysis{
+		ID:             "analysis-blank-cache",
+		DocumentID:     doc.ID,
+		UserID:         doc.UserID,
+		JobDescription: "jd",
+		PromptVersion:  "v1",
+		Status:         StatusQueued,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	if err := svc.ProcessAnalysis(context.Background(), analysis.ID); err != nil {
+		t.Fatalf("expected analysis to re-extract and complete, got %v", err)
+	}
+	if strings.TrimSpace(llmClient.input.ResumeText) == "" {
+		t.Fatalf("expected LLM to receive re-extracted resume text")
+	}
+	body, err := store.Open(context.Background(), "original.docx.extracted.txt")
+	if err != nil {
+		t.Fatalf("open re-extracted text: %v", err)
+	}
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("read re-extracted text: %v", err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		t.Fatalf("expected cached extracted text to be replaced")
 	}
 }
 

@@ -342,6 +342,19 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 			}
 		}
 	}
+	if strings.TrimSpace(extracted) == "" {
+		telemetry.Info("analysis.document.extracted_empty", map[string]any{
+			"request_id":       requestID,
+			"document_id":      doc.ID,
+			"storage_provider": storageProvider,
+		})
+		extracted, extractedKey, err = s.reextractDocumentText(ctx, doc, storageProvider)
+		if err != nil {
+			err = fmt.Errorf("document %s mime %s: re-extract empty cached text: %w", doc.ID, doc.MimeType, err)
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
+		}
+	}
 
 	input := llm.AnalyzeInput{
 		ResumeText:     extracted,
@@ -552,6 +565,41 @@ func sanitizeError(err error) string {
 		msg = msg[:maxLen]
 	}
 	return msg
+}
+
+func (s *Service) reextractDocumentText(ctx context.Context, doc documents.Document, storageProvider string) (string, string, error) {
+	extractedKey := doc.StorageKey + ".extracted.txt"
+	switch storageProvider {
+	case "s3":
+		s3Client, err := newS3DocClient(ctx)
+		if err != nil {
+			return "", "", fmt.Errorf("s3 client: %w", err)
+		}
+		raw, err := s3Client.GetObjectBytes(ctx, doc.StorageKey)
+		if err != nil {
+			return "", "", fmt.Errorf("s3 read: %w", err)
+		}
+		extracted, err := extract.ExtractTextFromBytes(ctx, raw, doc.MimeType, doc.FileName)
+		if err != nil {
+			return "", "", err
+		}
+		if err := s3Client.PutText(ctx, extractedKey, extracted); err != nil {
+			return "", "", fmt.Errorf("store extracted: %w", err)
+		}
+		if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+			return "", "", fmt.Errorf("update extraction: %w", err)
+		}
+		return extracted, extractedKey, nil
+	default:
+		extracted, err := extract.ExtractText(ctx, s.Store, doc.StorageKey, doc.MimeType, doc.FileName)
+		if err != nil {
+			return "", "", err
+		}
+		if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
+			return "", "", fmt.Errorf("update extraction: %w", err)
+		}
+		return extracted, extractedKey, nil
+	}
 }
 
 func loadText(ctx context.Context, store object.ObjectStore, key string) (string, error) {
