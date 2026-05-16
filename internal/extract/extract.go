@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -128,13 +129,39 @@ func extractPDFWithLibrary(data []byte) (string, error) {
 }
 
 func extractPDFWithPoppler(ctx context.Context, data []byte) (string, error) {
-	cmd := exec.CommandContext(ctx, "pdftotext", "-", "-")
+	binary, err := pdftotextBinary()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, binary, "-", "-")
 	cmd.Stdin = bytes.NewReader(data)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func pdftotextBinary() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("PDFTOTEXT_PATH")); configured != "" {
+		info, err := os.Stat(configured)
+		if err != nil {
+			return "", fmt.Errorf("PDFTOTEXT_PATH %q is not usable: %w", configured, err)
+		}
+		if info.IsDir() || info.Mode()&0o111 == 0 {
+			return "", fmt.Errorf("PDFTOTEXT_PATH %q is not executable", configured)
+		}
+		return configured, nil
+	}
+	if found, err := exec.LookPath("pdftotext"); err == nil {
+		return found, nil
+	}
+	for _, candidate := range []string{"/usr/bin/pdftotext", "/usr/local/bin/pdftotext"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate, nil
+		}
+	}
+	return "", errors.New(`pdftotext executable not found; install poppler-utils or set PDFTOTEXT_PATH`)
 }
 
 func extractDOCX(data []byte) (string, error) {

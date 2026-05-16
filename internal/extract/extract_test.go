@@ -106,6 +106,34 @@ func TestSaveExtractedRejectsBlankText(t *testing.T) {
 	}
 }
 
+func TestPDFToTextBinaryUsesConfiguredPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pdftotext")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fake pdftotext: %v", err)
+	}
+	t.Setenv("PDFTOTEXT_PATH", path)
+
+	got, err := pdftotextBinary()
+	if err != nil {
+		t.Fatalf("expected configured pdftotext path, got %v", err)
+	}
+	if got != path {
+		t.Fatalf("expected configured path %q, got %q", path, got)
+	}
+}
+
+func TestPDFToTextBinaryRejectsBadConfiguredPath(t *testing.T) {
+	t.Setenv("PDFTOTEXT_PATH", filepath.Join(t.TempDir(), "missing-pdftotext"))
+
+	_, err := pdftotextBinary()
+	if err == nil {
+		t.Fatal("expected invalid configured pdftotext path to fail")
+	}
+	if !strings.Contains(err.Error(), "PDFTOTEXT_PATH") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func stubPDFExtractors(primary func([]byte) (string, error), fallback func(context.Context, []byte) (string, error)) func() {
 	oldPrimary := extractPDFPlainText
 	oldFallback := extractPDFWithFallback
