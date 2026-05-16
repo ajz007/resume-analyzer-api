@@ -122,11 +122,9 @@ func ValidateV2_3WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		return nil, err
 	}
 	var parsed AnalysisResultV2_3
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, err
-	}
-	SanitizeV2_3(&parsed)
-	if err := parsed.Validate(); err != nil {
+	issues, err := parseRecoverValidateV2_3(raw, &parsed)
+	logValidationTelemetry(ctx, "analysis.validation.attempt", "v2_3", issues)
+	if err != nil {
 		return nil, err
 	}
 	if err := ValidateContentV2_3(&parsed); err != nil {
@@ -136,11 +134,9 @@ func ValidateV2_3WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		if retryErr != nil {
 			return nil, retryErr
 		}
-		if err := json.Unmarshal(rawRetry, &parsed); err != nil {
-			return nil, err
-		}
-		SanitizeV2_3(&parsed)
-		if err := parsed.Validate(); err != nil {
+		issues, err := parseRecoverValidateV2_3(rawRetry, &parsed)
+		logValidationTelemetry(ctx, "analysis.validation.retry", "v2_3", issues)
+		if err != nil {
 			return nil, err
 		}
 		if err := ValidateContentV2_3(&parsed); err != nil {
@@ -160,9 +156,9 @@ func ValidateV2_3WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 			}
 			return nil, err
 		}
-		return rawRetry, nil
+		return marshalRecoveredPayload(rawRetry, parsed, issues)
 	}
-	return raw, nil
+	return marshalRecoveredPayload(raw, parsed, issues)
 }
 
 // ValidateV2_4WithRetry validates v2_4 schema and content guardrails with one retry.
@@ -172,7 +168,9 @@ func ValidateV2_4WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		return nil, err
 	}
 	var parsed AnalysisResultV2_4
-	if err := parseAndValidateV2_4(raw, &parsed); err != nil {
+	issues, err := parseRecoverValidateV2_4(raw, &parsed)
+	logValidationTelemetry(ctx, "analysis.validation.attempt", "v2_4", issues)
+	if err != nil {
 		return nil, err
 	}
 	if err := ValidateContentV2_4(&parsed); err != nil {
@@ -182,7 +180,9 @@ func ValidateV2_4WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 		if retryErr != nil {
 			return nil, retryErr
 		}
-		if err := parseAndValidateV2_4(rawRetry, &parsed); err != nil {
+		issues, err := parseRecoverValidateV2_4(rawRetry, &parsed)
+		logValidationTelemetry(ctx, "analysis.validation.retry", "v2_4", issues)
+		if err != nil {
 			return nil, err
 		}
 		if err := ValidateContentV2_4(&parsed); err != nil {
@@ -204,9 +204,9 @@ func ValidateV2_4WithRetry(ctx context.Context, client llm.Client, input llm.Ana
 			}
 			return nil, err
 		}
-		return rawRetry, nil
+		return marshalRecoveredPayload(rawRetry, parsed, issues)
 	}
-	return raw, nil
+	return marshalRecoveredPayload(raw, parsed, issues)
 }
 
 func parseAndValidateV2_2(raw []byte, out *AnalysisResultV2_2) error {
@@ -233,6 +233,42 @@ func parseAndValidateV2_4(raw []byte, out *AnalysisResultV2_4) error {
 	}
 	SanitizeV2_4(out)
 	return out.Validate()
+}
+
+func parseRecoverValidateV2_3(raw []byte, out *AnalysisResultV2_3) ([]ValidationIssue, error) {
+	if err := json.Unmarshal(raw, out); err != nil {
+		return []ValidationIssue{{Path: "$", Message: err.Error(), Severity: ValidationFatal}}, err
+	}
+	issues := recoverAnalysisV2_3(out)
+	issues = append(issues, validateAnalysisV2_3(out)...)
+	if fatal := fatalValidationIssues(issues); len(fatal) > 0 {
+		return issues, ValidationIssuesError{Issues: fatal}
+	}
+	return issues, nil
+}
+
+func parseRecoverValidateV2_4(raw []byte, out *AnalysisResultV2_4) ([]ValidationIssue, error) {
+	if err := json.Unmarshal(raw, out); err != nil {
+		return []ValidationIssue{{Path: "$", Message: err.Error(), Severity: ValidationFatal}}, err
+	}
+	issues := recoverAnalysisV2_4(out)
+	issues = append(issues, validateAnalysisV2_4(out)...)
+	if fatal := fatalValidationIssues(issues); len(fatal) > 0 {
+		return issues, ValidationIssuesError{Issues: fatal}
+	}
+	return issues, nil
+}
+
+func marshalRecoveredPayload[T any](raw []byte, parsed T, issues []ValidationIssue) ([]byte, error) {
+	counts := countValidationIssuesBySeverity(issues)
+	if counts[ValidationRecoverable] == 0 && counts[ValidationWarning] == 0 {
+		return raw, nil
+	}
+	payload, err := json.Marshal(parsed)
+	if err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func containsForbiddenTerm(text string) (string, bool) {

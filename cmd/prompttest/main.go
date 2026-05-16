@@ -108,6 +108,11 @@ func main() {
 		if err != nil {
 			exitErr(fmt.Sprintf("v2_3 schema: %v", err))
 		}
+	case "v2_4":
+		raw, err = analyses.ValidateV2_4WithRetry(context.Background(), client, input)
+		if err != nil {
+			exitErr(fmt.Sprintf("v2_4 schema: %v", err))
+		}
 	default:
 		exitErr(fmt.Sprintf("unsupported prompt version: %s", *promptVersion))
 	}

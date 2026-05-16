@@ -351,6 +351,7 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 	}
 	var promptHash string
 	ctxWithHash := llm.WithPromptHashCapture(ctx, &promptHash)
+	ctxWithHash = withValidationTelemetryAnalysisID(ctxWithHash, analysisID)
 
 	var raw json.RawMessage
 	if analysis.PromptVersion == "v2" {
