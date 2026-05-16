@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,4 +45,93 @@ func TestExtractTextFromBytes_RealZipRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), "unsupported mime type: application/zip") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestExtractTextFromBytes_PDFFallsBackWhenPrimaryBlank(t *testing.T) {
+	restore := stubPDFExtractors(
+		func(data []byte) (string, error) { return "", nil },
+		func(ctx context.Context, data []byte) (string, error) { return "fallback resume text", nil },
+	)
+	defer restore()
+
+	got, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
+	if err != nil {
+		t.Fatalf("expected fallback extraction to pass, got %v", err)
+	}
+	if got != "fallback resume text" {
+		t.Fatalf("expected fallback text, got %q", got)
+	}
+}
+
+func TestExtractTextFromBytes_PDFRejectsBlankExtraction(t *testing.T) {
+	restore := stubPDFExtractors(
+		func(data []byte) (string, error) { return "", nil },
+		func(ctx context.Context, data []byte) (string, error) { return " \n\t", nil },
+	)
+	defer restore()
+
+	_, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
+	if err == nil {
+		t.Fatal("expected blank PDF extraction to fail")
+	}
+	if !strings.Contains(err.Error(), "produced no text") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExtractTextFromBytes_PDFFallsBackWhenPrimaryErrors(t *testing.T) {
+	restore := stubPDFExtractors(
+		func(data []byte) (string, error) { return "", errors.New("primary failed") },
+		func(ctx context.Context, data []byte) (string, error) { return "fallback resume text", nil },
+	)
+	defer restore()
+
+	got, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
+	if err != nil {
+		t.Fatalf("expected fallback extraction to pass, got %v", err)
+	}
+	if got != "fallback resume text" {
+		t.Fatalf("expected fallback text, got %q", got)
+	}
+}
+
+func TestSaveExtractedRejectsBlankText(t *testing.T) {
+	store := &capturingSaver{}
+	err := saveExtracted(context.Background(), store, "resume.pdf.extracted.txt", " \n\t")
+	if err == nil {
+		t.Fatal("expected blank extracted text to be rejected")
+	}
+	if store.calls != 0 {
+		t.Fatalf("expected blank text not to be cached, got %d save calls", store.calls)
+	}
+}
+
+func stubPDFExtractors(primary func([]byte) (string, error), fallback func(context.Context, []byte) (string, error)) func() {
+	oldPrimary := extractPDFPlainText
+	oldFallback := extractPDFWithFallback
+	extractPDFPlainText = primary
+	extractPDFWithFallback = fallback
+	return func() {
+		extractPDFPlainText = oldPrimary
+		extractPDFWithFallback = oldFallback
+	}
+}
+
+type capturingSaver struct {
+	calls int
+}
+
+func (s *capturingSaver) Save(ctx context.Context, userId string, fileName string, r io.Reader) (string, int64, string, error) {
+	n, err := io.Copy(io.Discard, r)
+	return "key", n, "text/plain", err
+}
+
+func (s *capturingSaver) Open(ctx context.Context, storageKey string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (s *capturingSaver) SaveWithKey(ctx context.Context, storageKey string, contentType string, r io.Reader) (int64, error) {
+	s.calls++
+	n, err := io.Copy(io.Discard, r)
+	return n, err
 }

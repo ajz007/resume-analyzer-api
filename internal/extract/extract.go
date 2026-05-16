@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -60,7 +61,7 @@ func ExtractTextFromBytes(ctx context.Context, data []byte, mimeType string, fil
 	normalized := normalizeMimeType(mimeType, fileName, data)
 	switch normalized {
 	case mimePDF:
-		return extractPDF(data)
+		return extractPDF(ctx, data)
 	case mimeDOCX:
 		return extractDOCX(data)
 	default:
@@ -73,6 +74,9 @@ type keySaver interface {
 }
 
 func saveExtracted(ctx context.Context, store object.ObjectStore, key string, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("extracted text is empty")
+	}
 	saver, ok := store.(keySaver)
 	if !ok {
 		return errors.New("object store does not support SaveWithKey")
@@ -82,7 +86,31 @@ func saveExtracted(ctx context.Context, store object.ObjectStore, key string, te
 	return err
 }
 
-func extractPDF(data []byte) (string, error) {
+var (
+	extractPDFPlainText    = extractPDFWithLibrary
+	extractPDFWithFallback = extractPDFWithPoppler
+)
+
+func extractPDF(ctx context.Context, data []byte) (string, error) {
+	text, err := extractPDFPlainText(data)
+	if err == nil && strings.TrimSpace(text) != "" {
+		return text, nil
+	}
+
+	fallbackText, fallbackErr := extractPDFWithFallback(ctx, data)
+	if fallbackErr == nil && strings.TrimSpace(fallbackText) != "" {
+		return fallbackText, nil
+	}
+	if err != nil && fallbackErr != nil {
+		return "", fmt.Errorf("pdf text extraction failed: primary: %v; fallback: %w", err, fallbackErr)
+	}
+	if fallbackErr != nil {
+		return "", fmt.Errorf("pdf text extraction produced no text; fallback failed: %w", fallbackErr)
+	}
+	return "", errors.New("pdf text extraction produced no text")
+}
+
+func extractPDFWithLibrary(data []byte) (string, error) {
 	reader := bytes.NewReader(data)
 	pdfReader, err := pdf.NewReader(reader, int64(len(data)))
 	if err != nil {
@@ -97,6 +125,16 @@ func extractPDF(data []byte) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+func extractPDFWithPoppler(ctx context.Context, data []byte) (string, error) {
+	cmd := exec.CommandContext(ctx, "pdftotext", "-", "-")
+	cmd.Stdin = bytes.NewReader(data)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func extractDOCX(data []byte) (string, error) {
