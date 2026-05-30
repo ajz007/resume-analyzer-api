@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"resume-backend/internal/documents"
+	"resume-backend/internal/extract"
 	"resume-backend/internal/llm"
 	"resume-backend/internal/shared/storage/object"
 	"resume-backend/internal/shared/storage/object/local"
@@ -31,10 +32,12 @@ func (s staticLLMResponse) AnalyzeResume(ctx context.Context, input llm.AnalyzeI
 type captureLLMResponse struct {
 	resp  string
 	input llm.AnalyzeInput
+	calls int
 }
 
 func (s *captureLLMResponse) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.RawMessage, error) {
 	_ = ctx
+	s.calls++
 	s.input = input
 	return json.RawMessage(s.resp), nil
 }
@@ -250,6 +253,79 @@ func TestProcessAnalysisReextractsBlankCachedText(t *testing.T) {
 	}
 	if strings.TrimSpace(string(data)) == "" {
 		t.Fatalf("expected cached extracted text to be replaced")
+	}
+}
+
+func TestProcessAnalysisStoresParseFailureAndSkipsLLM(t *testing.T) {
+	store := local.New(t.TempDir())
+	saver, ok := store.(interface {
+		SaveWithKey(ctx context.Context, storageKey string, contentType string, r io.Reader) (int64, error)
+	})
+	if !ok {
+		t.Fatalf("local store must support SaveWithKey")
+	}
+	if _, err := saver.SaveWithKey(context.Background(), "bad.pdf", "application/pdf", strings.NewReader("%PDF-not-a-real-pdf")); err != nil {
+		t.Fatalf("save bad pdf: %v", err)
+	}
+
+	llmClient := &captureLLMResponse{resp: `{}`}
+	docRepo := documents.NewMemoryRepo()
+	analysisRepo := NewMemoryRepo()
+	doc := documents.Document{
+		ID:              "doc-parse-fail",
+		UserID:          "user-1",
+		FileName:        "bad.pdf",
+		MimeType:        "application/pdf",
+		SizeBytes:       19,
+		StorageProvider: "local",
+		StorageKey:      "bad.pdf",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := docRepo.Create(context.Background(), doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	svc := &Service{Repo: analysisRepo, DocRepo: docRepo, Store: store, LLM: llmClient}
+	analysis := Analysis{
+		ID:             "analysis-parse-fail",
+		DocumentID:     doc.ID,
+		UserID:         doc.UserID,
+		JobDescription: "jd",
+		PromptVersion:  "v1",
+		Status:         StatusQueued,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create analysis: %v", err)
+	}
+
+	if err := svc.ProcessAnalysis(context.Background(), analysis.ID); err == nil {
+		t.Fatalf("expected parse failure error")
+	}
+
+	got, err := analysisRepo.GetByID(context.Background(), analysis.ID)
+	if err != nil {
+		t.Fatalf("get analysis: %v", err)
+	}
+	if got.Status != StatusFailed {
+		t.Fatalf("expected status failed, got %s", got.Status)
+	}
+	if got.ErrorCode != ErrorCodeUnsupportedFormat {
+		t.Fatalf("expected error code %s, got %s", ErrorCodeUnsupportedFormat, got.ErrorCode)
+	}
+	if got.ErrorRetryable {
+		t.Fatalf("expected parse failure to be non-retryable")
+	}
+	if got.Result == nil {
+		t.Fatalf("expected structured parse result")
+	}
+	if got.Result["status"] != string(extract.ParseFailed) {
+		t.Fatalf("expected parse result status %s, got %v", extract.ParseFailed, got.Result["status"])
+	}
+	if got.Result["code"] != ErrorCodeUnsupportedFormat {
+		t.Fatalf("expected parse code %s, got %v", ErrorCodeUnsupportedFormat, got.Result["code"])
+	}
+	if llmClient.calls != 0 {
+		t.Fatalf("expected LLM not to be called, got %d calls", llmClient.calls)
 	}
 }
 

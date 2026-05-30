@@ -8,10 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
 
@@ -22,6 +21,50 @@ const (
 	mimePDF  = "application/pdf"
 	mimeDOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+
+type ParseStatus string
+
+const (
+	ParseSuccess       ParseStatus = "PARSE_SUCCESS"
+	ParseLowConfidence ParseStatus = "PARSE_LOW_CONFIDENCE"
+	ParseFailed        ParseStatus = "PARSE_FAILED"
+)
+
+const (
+	ParseCodeUnsupportedResumeFormat = "UNSUPPORTED_RESUME_FORMAT"
+)
+
+const (
+	// These thresholds intentionally catch only obviously unusable extraction.
+	// A short but real one-page resume can be compact, so the service treats
+	// borderline output as a parse-status response instead of fabricating text.
+	minSuccessfulTextRunes    = 120
+	minLowConfidenceTextRunes = 80
+)
+
+type ParseIssue struct {
+	Status                 ParseStatus
+	Code                   string
+	Title                  string
+	Message                string
+	Recommendations        []string
+	Parser                 string
+	FileType               string
+	ExtractedCharCount     int
+	ATSInsightTitle        string
+	ATSInsightMessage      string
+	TechnicalDetailForLogs string
+}
+
+func (e *ParseIssue) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.TechnicalDetailForLogs) != "" {
+		return e.TechnicalDetailForLogs
+	}
+	return e.Message
+}
 
 // ExtractText pulls text from a stored object and persists a derived .extracted.txt copy.
 // Libraries used: github.com/ledongthuc/pdf (PDF) and github.com/nguyenthenguyen/docx (DOCX).
@@ -62,9 +105,16 @@ func ExtractTextFromBytes(ctx context.Context, data []byte, mimeType string, fil
 	normalized := normalizeMimeType(mimeType, fileName, data)
 	switch normalized {
 	case mimePDF:
-		return extractPDF(ctx, data)
+		return extractPDF(data, normalized)
 	case mimeDOCX:
-		return extractDOCX(data)
+		text, err := extractDOCX(data)
+		if err != nil {
+			return "", newParseIssue(ParseFailed, "docx", normalized, 0, err.Error())
+		}
+		if issue := assessTextQuality(text, "docx", normalized, ""); issue != nil {
+			return "", issue
+		}
+		return text, nil
 	default:
 		return "", fmt.Errorf("unsupported mime type: %s", normalized)
 	}
@@ -87,28 +137,17 @@ func saveExtracted(ctx context.Context, store object.ObjectStore, key string, te
 	return err
 }
 
-var (
-	extractPDFPlainText    = extractPDFWithLibrary
-	extractPDFWithFallback = extractPDFWithPoppler
-)
+var extractPDFPlainText = extractPDFWithLibrary
 
-func extractPDF(ctx context.Context, data []byte) (string, error) {
+func extractPDF(data []byte, fileType string) (string, error) {
 	text, err := extractPDFPlainText(data)
-	if err == nil && strings.TrimSpace(text) != "" {
-		return text, nil
+	if err != nil {
+		return "", newParseIssue(ParseFailed, "github.com/ledongthuc/pdf", fileType, 0, err.Error())
 	}
-
-	fallbackText, fallbackErr := extractPDFWithFallback(ctx, data)
-	if fallbackErr == nil && strings.TrimSpace(fallbackText) != "" {
-		return fallbackText, nil
+	if issue := assessTextQuality(text, "github.com/ledongthuc/pdf", fileType, ""); issue != nil {
+		return "", issue
 	}
-	if err != nil && fallbackErr != nil {
-		return "", fmt.Errorf("pdf text extraction failed: primary: %v; fallback: %w", err, fallbackErr)
-	}
-	if fallbackErr != nil {
-		return "", fmt.Errorf("pdf text extraction produced no text; fallback failed: %w", fallbackErr)
-	}
-	return "", errors.New("pdf text extraction produced no text")
+	return text, nil
 }
 
 func extractPDFWithLibrary(data []byte) (string, error) {
@@ -126,42 +165,6 @@ func extractPDFWithLibrary(data []byte) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
-}
-
-func extractPDFWithPoppler(ctx context.Context, data []byte) (string, error) {
-	binary, err := pdftotextBinary()
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.CommandContext(ctx, binary, "-", "-")
-	cmd.Stdin = bytes.NewReader(data)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-func pdftotextBinary() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("PDFTOTEXT_PATH")); configured != "" {
-		info, err := os.Stat(configured)
-		if err != nil {
-			return "", fmt.Errorf("PDFTOTEXT_PATH %q is not usable: %w", configured, err)
-		}
-		if info.IsDir() || info.Mode()&0o111 == 0 {
-			return "", fmt.Errorf("PDFTOTEXT_PATH %q is not executable", configured)
-		}
-		return configured, nil
-	}
-	if found, err := exec.LookPath("pdftotext"); err == nil {
-		return found, nil
-	}
-	for _, candidate := range []string{"/usr/bin/pdftotext", "/usr/local/bin/pdftotext"} {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return candidate, nil
-		}
-	}
-	return "", errors.New(`pdftotext executable not found; install poppler-utils or set PDFTOTEXT_PATH`)
 }
 
 func extractDOCX(data []byte) (string, error) {
@@ -198,6 +201,60 @@ func extractDOCX(data []byte) (string, error) {
 	}
 
 	return stripDocxXML(string(raw)), nil
+}
+
+func assessTextQuality(text string, parser string, fileType string, technicalDetail string) *ParseIssue {
+	charCount := utf8.RuneCountInString(strings.TrimSpace(text))
+	switch {
+	case charCount == 0:
+		return newParseIssue(ParseFailed, parser, fileType, charCount, fallbackString(technicalDetail, "extracted text is empty"))
+	case charCount < minLowConfidenceTextRunes:
+		return newParseIssue(ParseFailed, parser, fileType, charCount, fallbackString(technicalDetail, "extracted text is too small"))
+	case charCount < minSuccessfulTextRunes:
+		return newParseIssue(ParseLowConfidence, parser, fileType, charCount, fallbackString(technicalDetail, "extracted text is below confidence threshold"))
+	default:
+		return nil
+	}
+}
+
+func newParseIssue(status ParseStatus, parser string, fileType string, charCount int, technicalDetail string) *ParseIssue {
+	return &ParseIssue{
+		Status:             status,
+		Code:               ParseCodeUnsupportedResumeFormat,
+		Title:              "Unable to reliably read resume",
+		Message:            "Your resume appears to use formatting that may be difficult for ATS systems and resume parsers to read.",
+		Recommendations:    ParseRecommendations(),
+		Parser:             parser,
+		FileType:           fileType,
+		ExtractedCharCount: charCount,
+		ATSInsightTitle:    "Resume Format Warning",
+		ATSInsightMessage:  "Your resume format may not be ATS-friendly. If our parser cannot reliably extract text, some ATS platforms may also struggle to process it.",
+		TechnicalDetailForLogs: fmt.Sprintf(
+			"resume parse %s: code=%s parser=%s file_type=%s extracted_chars=%d detail=%s",
+			status,
+			ParseCodeUnsupportedResumeFormat,
+			parser,
+			fileType,
+			charCount,
+			technicalDetail,
+		),
+	}
+}
+
+func ParseRecommendations() []string {
+	return []string{
+		"Upload a DOCX version",
+		"Export as a text-based PDF",
+		"Avoid Canva-style or image-heavy layouts",
+		"Try a simpler ATS-friendly format",
+	}
+}
+
+func fallbackString(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func stripDocxXML(raw string) string {
