@@ -47,51 +47,89 @@ func TestExtractTextFromBytes_RealZipRejected(t *testing.T) {
 	}
 }
 
-func TestExtractTextFromBytes_PDFFallsBackWhenPrimaryBlank(t *testing.T) {
-	restore := stubPDFExtractors(
-		func(data []byte) (string, error) { return "", nil },
-		func(ctx context.Context, data []byte) (string, error) { return "fallback resume text", nil },
-	)
-	defer restore()
-
-	got, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
-	if err != nil {
-		t.Fatalf("expected fallback extraction to pass, got %v", err)
-	}
-	if got != "fallback resume text" {
-		t.Fatalf("expected fallback text, got %q", got)
-	}
-}
-
 func TestExtractTextFromBytes_PDFRejectsBlankExtraction(t *testing.T) {
-	restore := stubPDFExtractors(
-		func(data []byte) (string, error) { return "", nil },
-		func(ctx context.Context, data []byte) (string, error) { return " \n\t", nil },
-	)
+	restore := stubPDFExtractor(func(data []byte) (string, error) { return "", nil })
 	defer restore()
 
 	_, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
 	if err == nil {
 		t.Fatal("expected blank PDF extraction to fail")
 	}
-	if !strings.Contains(err.Error(), "produced no text") {
-		t.Fatalf("unexpected error: %v", err)
+	var issue *ParseIssue
+	if !errors.As(err, &issue) {
+		t.Fatalf("expected ParseIssue, got %T %v", err, err)
+	}
+	if issue.Status != ParseFailed {
+		t.Fatalf("expected status %s, got %s", ParseFailed, issue.Status)
+	}
+	if issue.ExtractedCharCount != 0 {
+		t.Fatalf("expected 0 chars, got %d", issue.ExtractedCharCount)
 	}
 }
 
-func TestExtractTextFromBytes_PDFFallsBackWhenPrimaryErrors(t *testing.T) {
-	restore := stubPDFExtractors(
-		func(data []byte) (string, error) { return "", errors.New("primary failed") },
-		func(ctx context.Context, data []byte) (string, error) { return "fallback resume text", nil },
-	)
+func TestExtractTextFromBytes_PDFRejectsLowConfidenceExtraction(t *testing.T) {
+	restore := stubPDFExtractor(func(data []byte) (string, error) { return "small text", nil })
+	defer restore()
+
+	_, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
+	if err == nil {
+		t.Fatal("expected low-confidence PDF extraction to fail")
+	}
+	var issue *ParseIssue
+	if !errors.As(err, &issue) {
+		t.Fatalf("expected ParseIssue, got %T %v", err, err)
+	}
+	if issue.Status != ParseFailed {
+		t.Fatalf("expected very small text to be parse failed, got %s", issue.Status)
+	}
+}
+
+func TestExtractTextFromBytes_PDFRejectsLowConfidenceButNonTinyExtraction(t *testing.T) {
+	text := strings.Repeat("resume ", 15)
+	restore := stubPDFExtractor(func(data []byte) (string, error) { return text, nil })
+	defer restore()
+
+	_, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
+	if err == nil {
+		t.Fatal("expected low-confidence PDF extraction to fail")
+	}
+	var issue *ParseIssue
+	if !errors.As(err, &issue) {
+		t.Fatalf("expected ParseIssue, got %T %v", err, err)
+	}
+	if issue.Status != ParseLowConfidence {
+		t.Fatalf("expected status %s, got %s", ParseLowConfidence, issue.Status)
+	}
+}
+
+func TestExtractTextFromBytes_PDFPassesSufficientText(t *testing.T) {
+	text := strings.Repeat("resume ", 100)
+	restore := stubPDFExtractor(func(data []byte) (string, error) { return text, nil })
 	defer restore()
 
 	got, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
 	if err != nil {
-		t.Fatalf("expected fallback extraction to pass, got %v", err)
+		t.Fatalf("expected sufficient text to pass, got %v", err)
 	}
-	if got != "fallback resume text" {
-		t.Fatalf("expected fallback text, got %q", got)
+	if got != text {
+		t.Fatalf("expected extracted text, got %q", got)
+	}
+}
+
+func TestExtractTextFromBytes_PDFWrapsPrimaryErrorAsParseIssue(t *testing.T) {
+	restore := stubPDFExtractor(func(data []byte) (string, error) { return "", errors.New("primary failed") })
+	defer restore()
+
+	_, err := ExtractTextFromBytes(context.Background(), []byte("%PDF"), "application/pdf", "resume.pdf")
+	if err == nil {
+		t.Fatal("expected primary error to fail")
+	}
+	var issue *ParseIssue
+	if !errors.As(err, &issue) {
+		t.Fatalf("expected ParseIssue, got %T %v", err, err)
+	}
+	if issue.Status != ParseFailed {
+		t.Fatalf("expected status %s, got %s", ParseFailed, issue.Status)
 	}
 }
 
@@ -106,42 +144,11 @@ func TestSaveExtractedRejectsBlankText(t *testing.T) {
 	}
 }
 
-func TestPDFToTextBinaryUsesConfiguredPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pdftotext")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write fake pdftotext: %v", err)
-	}
-	t.Setenv("PDFTOTEXT_PATH", path)
-
-	got, err := pdftotextBinary()
-	if err != nil {
-		t.Fatalf("expected configured pdftotext path, got %v", err)
-	}
-	if got != path {
-		t.Fatalf("expected configured path %q, got %q", path, got)
-	}
-}
-
-func TestPDFToTextBinaryRejectsBadConfiguredPath(t *testing.T) {
-	t.Setenv("PDFTOTEXT_PATH", filepath.Join(t.TempDir(), "missing-pdftotext"))
-
-	_, err := pdftotextBinary()
-	if err == nil {
-		t.Fatal("expected invalid configured pdftotext path to fail")
-	}
-	if !strings.Contains(err.Error(), "PDFTOTEXT_PATH") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func stubPDFExtractors(primary func([]byte) (string, error), fallback func(context.Context, []byte) (string, error)) func() {
+func stubPDFExtractor(primary func([]byte) (string, error)) func() {
 	oldPrimary := extractPDFPlainText
-	oldFallback := extractPDFWithFallback
 	extractPDFPlainText = primary
-	extractPDFWithFallback = fallback
 	return func() {
 		extractPDFPlainText = oldPrimary
-		extractPDFWithFallback = oldFallback
 	}
 }
 

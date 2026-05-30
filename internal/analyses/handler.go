@@ -128,6 +128,10 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRetryRequired):
+			if isParseFailureAnalysis(analysis) {
+				respond.JSON(c, http.StatusOK, parseFailureResponse(analysis))
+				return
+			}
 			respond.Error(c, http.StatusConflict, "retry_required", "analysis failed; set retry=true or X-Retry-Analysis: true to retry", nil)
 		case errors.Is(err, ErrJobQueueNotConfigured):
 			respond.Error(c, http.StatusInternalServerError, "internal_error", err.Error(), err)
@@ -148,6 +152,10 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 			"status":     analysis.Status,
 			"result":     analysis.Result,
 		})
+		return
+	}
+	if !created && isParseFailureAnalysis(analysis) {
+		respond.JSON(c, http.StatusOK, parseFailureResponse(analysis))
 		return
 	}
 
@@ -194,6 +202,13 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 		resp["completedAt"] = analysis.CompletedAt
 	}
 	if analysis.Status == StatusFailed {
+		if isParseFailureAnalysis(analysis) {
+			for key, value := range parseFailureResponse(analysis) {
+				resp[key] = value
+			}
+			respond.JSON(c, http.StatusOK, resp)
+			return
+		}
 		resp["errorCode"] = analysis.ErrorCode
 		resp["retryable"] = analysis.ErrorRetryable
 		if analysis.ErrorMessage != nil {

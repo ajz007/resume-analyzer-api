@@ -261,6 +261,7 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 		return err
 	}
 	storageProvider := normalizeStorageProvider(doc.StorageProvider)
+	parseParser := "cache"
 	telemetry.Info("analysis.document.storage", map[string]any{
 		"request_id":       requestID,
 		"document_id":      doc.ID,
@@ -287,9 +288,13 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 			extracted, err = extract.ExtractTextFromBytes(ctx, raw, doc.MimeType, doc.FileName)
 			if err != nil {
 				err = fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err)
+				if s.failParseAnalysisIfIssue(ctx, analysis, doc, err, &startedAt) {
+					return err
+				}
 				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 				return err
 			}
+			parseParser = parserNameForDocument(doc)
 			extractedKey = doc.StorageKey + ".extracted.txt"
 			if err := s3Client.PutText(ctx, extractedKey, extracted); err != nil {
 				err = fmt.Errorf("document %s mime %s: store extracted: %w", doc.ID, doc.MimeType, err)
@@ -304,9 +309,13 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 		default:
 			if _, err := extract.ExtractText(ctx, s.Store, doc.StorageKey, doc.MimeType, doc.FileName); err != nil {
 				err = fmt.Errorf("document %s mime %s: %w", doc.ID, doc.MimeType, err)
+				if s.failParseAnalysisIfIssue(ctx, analysis, doc, err, &startedAt) {
+					return err
+				}
 				s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 				return err
 			}
+			parseParser = parserNameForDocument(doc)
 			extractedKey = doc.StorageKey + ".extracted.txt"
 			if err := s.DocRepo.UpdateExtraction(ctx, doc.UserID, doc.ID, extractedKey, time.Now().UTC()); err != nil {
 				err = fmt.Errorf("document %s mime %s: update extraction: %w", doc.ID, doc.MimeType, err)
@@ -351,10 +360,15 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 		extracted, extractedKey, err = s.reextractDocumentText(ctx, doc, storageProvider)
 		if err != nil {
 			err = fmt.Errorf("document %s mime %s: re-extract empty cached text: %w", doc.ID, doc.MimeType, err)
+			if s.failParseAnalysisIfIssue(ctx, analysis, doc, err, &startedAt) {
+				return err
+			}
 			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 			return err
 		}
+		parseParser = parserNameForDocument(doc)
 	}
+	s.logParseTelemetry(ctx, analysis, doc, extract.ParseSuccess, parseParser, runeCount(extracted))
 
 	input := llm.AnalyzeInput{
 		ResumeText:     extracted,
@@ -517,6 +531,140 @@ func (s *Service) failAnalysis(ctx context.Context, analysisID, userID, document
 	})
 }
 
+func (s *Service) failParseAnalysisIfIssue(ctx context.Context, analysis Analysis, doc documents.Document, err error, startedAt *time.Time) bool {
+	var issue *extract.ParseIssue
+	if !errors.As(err, &issue) {
+		return false
+	}
+	s.failParseAnalysis(ctx, analysis, doc, issue, startedAt)
+	return true
+}
+
+func (s *Service) failParseAnalysis(ctx context.Context, analysis Analysis, doc documents.Document, issue *extract.ParseIssue, startedAt *time.Time) {
+	if issue == nil {
+		return
+	}
+	code := ErrorCodeUnsupportedFormat
+	msg := issue.Message
+	retryable := false
+	result := parseIssueResult(issue)
+	completedAt := time.Now().UTC()
+	if updateErr := s.Repo.UpdateStatusResultAndError(context.Background(), analysis.ID, StatusFailed, result, &code, &msg, &retryable, nil, &completedAt); updateErr != nil {
+		fmt.Printf("failParseAnalysis: update failed id=%s err=%v orig=%v\n", analysis.ID, updateErr, issue)
+	}
+	metrics.IncAnalysisFailed()
+	if startedAt != nil {
+		metrics.ObserveAnalysisDurationMs(durationMs(startedAt, &completedAt))
+	}
+	s.logParseTelemetry(ctx, analysis, doc, issue.Status, issue.Parser, issue.ExtractedCharCount)
+	telemetry.Info("analysis.status", map[string]any{
+		"request_id":        requestIDFromContext(ctx),
+		"user_id":           analysis.UserID,
+		"document_id":       analysis.DocumentID,
+		"analysis_id":       analysis.ID,
+		"status":            StatusFailed,
+		"status_transition": "processing->failed",
+		"duration_ms":       durationMs(startedAt, &completedAt),
+		"error_code":        code,
+	})
+}
+
+func parseIssueResult(issue *extract.ParseIssue) map[string]any {
+	if issue == nil {
+		return nil
+	}
+	status := issue.Status
+	if status == "" {
+		status = extract.ParseFailed
+	}
+	code := issue.Code
+	if strings.TrimSpace(code) == "" {
+		code = extract.ParseCodeUnsupportedResumeFormat
+	}
+	return map[string]any{
+		"status":          string(status),
+		"code":            code,
+		"title":           fallbackString(issue.Title, "Unable to reliably read resume"),
+		"message":         fallbackString(issue.Message, "Your resume appears to use formatting that may be difficult for ATS systems and resume parsers to read."),
+		"recommendations": fallbackStringSlice(issue.Recommendations, extract.ParseRecommendations()),
+		"atsInsight": map[string]any{
+			"title":   fallbackString(issue.ATSInsightTitle, "Resume Format Warning"),
+			"message": fallbackString(issue.ATSInsightMessage, "Your resume format may not be ATS-friendly. If our parser cannot reliably extract text, some ATS platforms may also struggle to process it."),
+		},
+	}
+}
+
+func isParseFailureAnalysis(analysis Analysis) bool {
+	if analysis.Status != StatusFailed {
+		return false
+	}
+	if analysis.ErrorCode != ErrorCodeUnsupportedFormat && analysis.ErrorCode != extract.ParseCodeUnsupportedResumeFormat {
+		return false
+	}
+	if analysis.Result == nil {
+		return false
+	}
+	status, _ := analysis.Result["status"].(string)
+	return status == string(extract.ParseFailed) || status == string(extract.ParseLowConfidence)
+}
+
+func parseFailureResponse(analysis Analysis) map[string]any {
+	resp := map[string]any{
+		"analysisId": analysis.ID,
+	}
+	for _, key := range []string{"status", "code", "title", "message", "recommendations", "atsInsight"} {
+		if value, ok := analysis.Result[key]; ok {
+			resp[key] = value
+		}
+	}
+	return resp
+}
+
+func fallbackStringSlice(value []string, fallback []string) []string {
+	if len(value) == 0 {
+		return fallback
+	}
+	return value
+}
+
+func (s *Service) logParseTelemetry(ctx context.Context, analysis Analysis, doc documents.Document, status extract.ParseStatus, parser string, charCount int) {
+	event := "resume.parse_success"
+	switch status {
+	case extract.ParseFailed:
+		event = "resume.parse_failed"
+	case extract.ParseLowConfidence:
+		event = "resume.parse_low_confidence"
+	}
+	telemetry.Info(event, map[string]any{
+		"request_id":             requestIDFromContext(ctx),
+		"user_id":                analysis.UserID,
+		"document_id":            doc.ID,
+		"analysis_id":            analysis.ID,
+		"file_type":              doc.MimeType,
+		"parser":                 fallbackString(parser, parserNameForDocument(doc)),
+		"extracted_char_count":   charCount,
+		"parse_status":           string(status),
+		"storage_provider":       normalizeStorageProvider(doc.StorageProvider),
+		"has_extracted_text_key": doc.ExtractedTextKey != "",
+	})
+}
+
+func parserNameForDocument(doc documents.Document) string {
+	mimeType := strings.ToLower(strings.TrimSpace(doc.MimeType))
+	switch mimeType {
+	case "application/pdf":
+		return "github.com/ledongthuc/pdf"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return "docx"
+	default:
+		return "unknown"
+	}
+}
+
+func runeCount(value string) int {
+	return len([]rune(strings.TrimSpace(value)))
+}
+
 func durationMs(startedAt, completedAt *time.Time) float64 {
 	if startedAt == nil || completedAt == nil {
 		return 0
@@ -527,6 +675,10 @@ func durationMs(startedAt, completedAt *time.Time) float64 {
 func classifyFailure(err error) (string, bool) {
 	if err == nil {
 		return ErrorCodeInternal, false
+	}
+	var parseIssue *extract.ParseIssue
+	if errors.As(err, &parseIssue) {
+		return ErrorCodeUnsupportedFormat, false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ErrorCodeLLMTimeout, true

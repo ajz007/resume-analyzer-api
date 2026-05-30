@@ -109,9 +109,15 @@ func TestAnalysisSortsSetLikeLists(t *testing.T) {
 }
 
 type analysisResponse struct {
-	ID     string         `json:"id"`
-	Status string         `json:"status"`
-	Result map[string]any `json:"result"`
+	ID              string         `json:"id"`
+	AnalysisID      string         `json:"analysisId"`
+	Status          string         `json:"status"`
+	Code            string         `json:"code"`
+	Title           string         `json:"title"`
+	Message         string         `json:"message"`
+	Recommendations []string       `json:"recommendations"`
+	ATSInsight      map[string]any `json:"atsInsight"`
+	Result          map[string]any `json:"result"`
 }
 
 func setupAnalysisRouterWithLLM(t *testing.T, fixture []byte) (*gin.Engine, *MemoryRepo, *Service) {
@@ -204,6 +210,59 @@ func getAnalysis(t *testing.T, router *gin.Engine, analysisID string) analysisRe
 		t.Fatalf("decode response: %v", err)
 	}
 	return out
+}
+
+func TestGetAnalysisReturnsStructuredParseFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, analysisRepo, _ := setupAnalysisRouterWithLLM(t, loadFixture(t, "testdata/v1_good.json"))
+	message := "Your resume appears to use formatting that may be difficult for ATS systems and resume parsers to read."
+	retryable := false
+	now := time.Now().UTC()
+	analysis := Analysis{
+		ID:             "analysis-parse-failure-response",
+		DocumentID:     "doc-guest:test-guest",
+		UserID:         "guest:test-guest",
+		JobDescription: strings.Repeat("a", 300),
+		PromptVersion:  "v1",
+		Status:         StatusFailed,
+		ErrorCode:      ErrorCodeUnsupportedFormat,
+		ErrorMessage:   &message,
+		ErrorRetryable: retryable,
+		Result: map[string]any{
+			"status":          "PARSE_FAILED",
+			"code":            ErrorCodeUnsupportedFormat,
+			"title":           "Unable to reliably read resume",
+			"message":         message,
+			"recommendations": []string{"Upload a DOCX version", "Export as a text-based PDF"},
+			"atsInsight": map[string]any{
+				"title":   "Resume Format Warning",
+				"message": "Your resume format may not be ATS-friendly.",
+			},
+		},
+		CreatedAt:   now,
+		CompletedAt: &now,
+	}
+	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
+		t.Fatalf("create failed analysis: %v", err)
+	}
+
+	resp := getAnalysis(t, router, analysis.ID)
+	if resp.Status != "PARSE_FAILED" {
+		t.Fatalf("expected parse status, got %q", resp.Status)
+	}
+	if resp.Code != ErrorCodeUnsupportedFormat {
+		t.Fatalf("expected code %s, got %s", ErrorCodeUnsupportedFormat, resp.Code)
+	}
+	if resp.Title != "Unable to reliably read resume" {
+		t.Fatalf("unexpected title %q", resp.Title)
+	}
+	if len(resp.Recommendations) != 2 {
+		t.Fatalf("expected recommendations, got %#v", resp.Recommendations)
+	}
+	if resp.ATSInsight["title"] != "Resume Format Warning" {
+		t.Fatalf("expected ats insight, got %#v", resp.ATSInsight)
+	}
 }
 
 func waitForStatus(t *testing.T, repo *MemoryRepo, analysisID, status string) {

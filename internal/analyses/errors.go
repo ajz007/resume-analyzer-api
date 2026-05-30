@@ -14,6 +14,7 @@ const (
 	ErrorCodeValidation        = "VALIDATION_ERROR"
 	ErrorCodeLLMTimeout        = "LLM_TIMEOUT"
 	ErrorCodeLLMSchemaMismatch = "LLM_SCHEMA_MISMATCH"
+	ErrorCodeUnsupportedFormat = "UNSUPPORTED_RESUME_FORMAT"
 	ErrorCodeStorage           = "STORAGE_ERROR"
 	ErrorCodeInternal          = "INTERNAL_ERROR"
 )
