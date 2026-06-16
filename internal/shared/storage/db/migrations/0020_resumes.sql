@@ -14,7 +14,14 @@ CREATE TABLE IF NOT EXISTS resume_versions (
     id UUID PRIMARY KEY,
     resume_id UUID NOT NULL REFERENCES resumes(id),
     version_number INTEGER NOT NULL,
-    source_type TEXT NOT NULL,
+    source_type TEXT NOT NULL CHECK (source_type IN (
+        'manual',
+        'parsed_from_upload',
+        'ai_generated',
+        'ai_improved',
+        'ai_tailored',
+        'export_snapshot'
+    )),
     resume_json JSONB NOT NULL,
     change_summary JSONB,
     parent_version_id UUID REFERENCES resume_versions(id),

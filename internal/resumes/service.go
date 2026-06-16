@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	modelv1 "resume-backend/resume/modelv1"
+	"resume-backend/resume/render"
 )
 
 type Service struct {
@@ -18,6 +20,9 @@ func (s *Service) Create(ctx context.Context, ownerID, title string, resume mode
 	ownerID = strings.TrimSpace(ownerID)
 	title = strings.TrimSpace(title)
 	if ownerID == "" || title == "" {
+		return SaveResult{}, ErrInvalidInput
+	}
+	if utf8.RuneCountInString(title) > maxTitleLength {
 		return SaveResult{}, ErrInvalidInput
 	}
 	if errs := modelv1.ValidateStructure(resume); len(errs) > 0 {
@@ -61,6 +66,9 @@ func (s *Service) Update(ctx context.Context, ownerID, resumeID, title string, r
 	resumeID = strings.TrimSpace(resumeID)
 	title = strings.TrimSpace(title)
 	if ownerID == "" || resumeID == "" || title == "" {
+		return SaveResult{}, ErrInvalidInput
+	}
+	if utf8.RuneCountInString(title) > maxTitleLength {
 		return SaveResult{}, ErrInvalidInput
 	}
 	if _, err := uuid.Parse(resumeID); err != nil {
@@ -126,4 +134,48 @@ func (s *Service) GetVersion(ctx context.Context, ownerID, resumeID, versionID s
 		return ResumeVersion{}, ErrInvalidInput
 	}
 	return s.Repo.GetVersionByID(ctx, ownerID, resumeID, versionID)
+}
+
+func (s *Service) ExportDOCX(ctx context.Context, ownerID, resumeID string) (ExportResult, error) {
+	resume, err := s.Get(ctx, ownerID, resumeID)
+	if err != nil {
+		return ExportResult{}, err
+	}
+	if errs := modelv1.ValidateStructure(resume.CurrentResume); len(errs) > 0 {
+		return ExportResult{}, ValidationError{Errors: errs}
+	}
+	docxBytes, err := render.RenderResumeModelV1(resume.CurrentResume)
+	if err != nil {
+		return ExportResult{}, err
+	}
+	return ExportResult{
+		FileName:          exportFileName(resume.Title),
+		DocxBytes:         docxBytes,
+		ReadinessWarnings: modelv1.ValidateReadiness(resume.CurrentResume),
+	}, nil
+}
+
+func exportFileName(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "resume.docx"
+	}
+	var builder strings.Builder
+	for _, r := range strings.ToLower(title) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		case r == '-' || r == '_':
+			builder.WriteRune(r)
+		case r == ' ':
+			builder.WriteRune('_')
+		}
+	}
+	name := strings.Trim(builder.String(), "_-")
+	if name == "" {
+		name = "resume"
+	}
+	return name + ".docx"
 }

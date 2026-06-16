@@ -82,6 +82,13 @@ func TestValidateStructureInvalidSectionOrderKey(t *testing.T) {
 	assertStructuralError(t, ValidateStructure(model), "sectionOrder[1]")
 }
 
+func TestValidateStructureDuplicateSectionOrderKey(t *testing.T) {
+	model := completeResume()
+	model.SectionOrder = []string{"summary", "skills", "summary"}
+
+	assertStructuralError(t, ValidateStructure(model), "sectionOrder[2]")
+}
+
 func TestValidateStructureEmptySkillCategoryAndName(t *testing.T) {
 	model := completeResume()
 	model.Skills[0].Category = " "
@@ -167,6 +174,27 @@ func TestValidateReadinessWarningsForIncompleteResume(t *testing.T) {
 	assertReadinessWarning(t, warnings, "experience[0].title")
 	assertReadinessWarning(t, warnings, "experience[0].startDate")
 	assertReadinessWarning(t, warnings, "experience[0].highlights[0].text")
+}
+
+func TestValidateReadinessWarnsForCurrentJobWithEndDate(t *testing.T) {
+	model := ResumeModel{
+		SchemaVersion: SchemaVersion,
+		Summary:       Summary{Text: "Summary with 20% measurable impact."},
+		Skills: []SkillCategory{{
+			Category: "Backend",
+			Items:    []SkillItem{{Name: "Go"}},
+		}},
+		Experience: []Experience{{
+			ID:        "exp-1",
+			Company:   "Acme",
+			Title:     "Engineer",
+			StartDate: "2023-01",
+			EndDate:   "2024-01",
+			IsCurrent: true,
+		}},
+	}
+
+	assertReadinessWarning(t, ValidateReadiness(model), "experience[0].endDate")
 }
 
 func TestReadinessWarningsDoNotAppearAsStructuralErrors(t *testing.T) {

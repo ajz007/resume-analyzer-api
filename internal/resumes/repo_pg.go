@@ -13,6 +13,9 @@ type PGRepo struct {
 }
 
 func (r *PGRepo) Create(ctx context.Context, resume Resume, version ResumeVersion) (Resume, error) {
+	if !validSourceType(version.SourceType) {
+		return Resume{}, ErrInvalidInput
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Resume{}, err
@@ -80,6 +83,9 @@ WHERE id = $2`
 }
 
 func (r *PGRepo) Update(ctx context.Context, ownerID, resumeID, title string, version ResumeVersion) (Resume, error) {
+	if !validSourceType(version.SourceType) {
+		return Resume{}, ErrInvalidInput
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Resume{}, err

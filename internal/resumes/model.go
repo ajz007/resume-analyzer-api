@@ -7,11 +7,31 @@ import (
 )
 
 const (
-	StatusDraft      = "draft"
-	SourceManual     = "manual"
-	defaultListLimit = 20
-	maxListLimit     = 100
+	StatusDraft            = "draft"
+	SourceManual           = "manual"
+	SourceParsedFromUpload = "parsed_from_upload"
+	SourceAIGenerated      = "ai_generated"
+	SourceAIImproved       = "ai_improved"
+	SourceAITailored       = "ai_tailored"
+	SourceExportSnapshot   = "export_snapshot"
+	maxTitleLength         = 160
+	defaultListLimit       = 20
+	maxListLimit           = 100
 )
+
+var allowedSourceTypes = map[string]struct{}{
+	SourceManual:           {},
+	SourceParsedFromUpload: {},
+	SourceAIGenerated:      {},
+	SourceAIImproved:       {},
+	SourceAITailored:       {},
+	SourceExportSnapshot:   {},
+}
+
+func validSourceType(sourceType string) bool {
+	_, ok := allowedSourceTypes[sourceType]
+	return ok
+}
 
 type Resume struct {
 	ID               string
@@ -37,5 +57,11 @@ type ResumeVersion struct {
 
 type SaveResult struct {
 	Resume            Resume
+	ReadinessWarnings []modelv1.ValidationWarning
+}
+
+type ExportResult struct {
+	FileName          string
+	DocxBytes         []byte
 	ReadinessWarnings []modelv1.ValidationWarning
 }

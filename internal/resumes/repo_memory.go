@@ -28,6 +28,9 @@ func (r *MemoryRepo) Create(ctx context.Context, resume Resume, version ResumeVe
 	if err := ctx.Err(); err != nil {
 		return Resume{}, err
 	}
+	if !validSourceType(version.SourceType) {
+		return Resume{}, ErrInvalidInput
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -41,6 +44,9 @@ func (r *MemoryRepo) Create(ctx context.Context, resume Resume, version ResumeVe
 func (r *MemoryRepo) Update(ctx context.Context, ownerID, resumeID, title string, version ResumeVersion) (Resume, error) {
 	if err := ctx.Err(); err != nil {
 		return Resume{}, err
+	}
+	if !validSourceType(version.SourceType) {
+		return Resume{}, ErrInvalidInput
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

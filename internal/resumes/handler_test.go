@@ -2,15 +2,19 @@ package resumes_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"resume-backend/internal/bootstrap"
+	resumespkg "resume-backend/internal/resumes"
 	"resume-backend/internal/shared/auth"
 	"resume-backend/internal/shared/config"
 	modelv1 "resume-backend/resume/modelv1"
@@ -49,6 +53,19 @@ func TestResumesCreateStructuralValidationFailure(t *testing.T) {
 	resp := performJSON(t, router, http.MethodPost, "/api/v1/resumes", uuid.NewString(), map[string]any{
 		"title":  "Invalid Resume",
 		"resume": resume,
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesCreateRejectsLongTitle(t *testing.T) {
+	router := newTestRouter(t)
+
+	resp := performJSON(t, router, http.MethodPost, "/api/v1/resumes", uuid.NewString(), map[string]any{
+		"title":  strings.Repeat("x", 161),
+		"resume": validResume(),
 	})
 
 	if resp.Code != http.StatusBadRequest {
@@ -174,6 +191,66 @@ func TestResumesGetVersionsAndVersion(t *testing.T) {
 	}
 }
 
+func TestResumesExportDOCXSuccess(t *testing.T) {
+	router := newTestRouter(t)
+	ownerID := "google:12345"
+	created := createResume(t, router, ownerID, "Backend Engineer Resume", validResume())
+
+	resp := performJSON(t, router, http.MethodPost, "/api/v1/resumes/"+created.ResumeID+"/export/docx", ownerID, nil)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if ct := resp.Header().Get("Content-Type"); ct != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		t.Fatalf("unexpected content type: %s", ct)
+	}
+	if cd := resp.Header().Get("Content-Disposition"); cd != `attachment; filename="backend_engineer_resume.docx"` {
+		t.Fatalf("unexpected content disposition: %s", cd)
+	}
+	if resp.Body.Len() == 0 {
+		t.Fatal("expected docx body")
+	}
+}
+
+func TestResumesExportDOCXStructuralValidationFailure(t *testing.T) {
+	app := newTestApp(t)
+	ownerID := "google:12345"
+	resumeID := uuid.NewString()
+	versionID := uuid.NewString()
+	now := time.Now().UTC()
+	invalid := modelv1.ResumeModel{SchemaVersion: "resume.v2"}
+
+	_, err := app.ResumesRepo.Create(context.Background(), resumespkg.Resume{
+		ID:               resumeID,
+		OwnerID:          ownerID,
+		Title:            "Invalid Resume",
+		Status:           resumespkg.StatusDraft,
+		CurrentVersionID: versionID,
+		CurrentResume:    invalid,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}, resumespkg.ResumeVersion{
+		ID:            versionID,
+		ResumeID:      resumeID,
+		VersionNumber: 1,
+		SourceType:    resumespkg.SourceManual,
+		Resume:        invalid,
+		CreatedAt:     now,
+	})
+	if err != nil {
+		t.Fatalf("seed invalid resume: %v", err)
+	}
+
+	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/"+resumeID+"/export/docx", ownerID, nil)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if cd := resp.Header().Get("Content-Disposition"); cd != "" {
+		t.Fatalf("expected no download header, got %s", cd)
+	}
+}
+
 func TestResumesInvalidResumeIDHandling(t *testing.T) {
 	router := newTestRouter(t)
 
@@ -198,6 +275,11 @@ type versionBody struct {
 
 func newTestRouter(t *testing.T) *gin.Engine {
 	t.Helper()
+	return newTestApp(t).Router
+}
+
+func newTestApp(t *testing.T) *bootstrap.App {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfg := config.Config{
 		Port:            "0",
@@ -210,7 +292,7 @@ func newTestRouter(t *testing.T) *gin.Engine {
 	if err != nil {
 		t.Fatalf("bootstrap build: %v", err)
 	}
-	return app.Router
+	return app
 }
 
 func createResume(t *testing.T, router *gin.Engine, ownerID, title string, resume modelv1.ResumeModel) resumeBody {

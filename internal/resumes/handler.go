@@ -29,6 +29,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.PUT("/resumes/:resumeId", h.update)
 	rg.GET("/resumes/:resumeId/versions", h.listVersions)
 	rg.GET("/resumes/:resumeId/versions/:versionId", h.getVersion)
+	rg.POST("/resumes/:resumeId/export/docx", h.exportDOCX)
 }
 
 type saveResumeRequest struct {
@@ -180,6 +181,22 @@ func (h *Handler) getVersion(c *gin.Context) {
 		return
 	}
 	respond.JSON(c, http.StatusOK, toVersionResponse(version))
+}
+
+func (h *Handler) exportDOCX(c *gin.Context) {
+	ownerID, ok := authenticatedOwnerID(c)
+	if !ok {
+		return
+	}
+
+	result, err := h.Svc.ExportDOCX(c.Request.Context(), ownerID, strings.TrimSpace(c.Param("resumeId")))
+	if err != nil {
+		h.respondServiceError(c, err)
+		return
+	}
+
+	c.Header("Content-Disposition", `attachment; filename="`+result.FileName+`"`)
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", result.DocxBytes)
 }
 
 func (h *Handler) respondServiceError(c *gin.Context, err error) {
