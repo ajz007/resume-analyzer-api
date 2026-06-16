@@ -11,6 +11,7 @@ import (
 	"resume-backend/internal/applies"
 	googleauth "resume-backend/internal/auth"
 	"resume-backend/internal/documents"
+	"resume-backend/internal/resumes"
 	"resume-backend/internal/shared/config"
 	"resume-backend/internal/shared/metrics"
 	"resume-backend/internal/shared/server/middleware"
@@ -28,6 +29,7 @@ type RouterDeps struct {
 	ApplyHandler    *applies.Handler
 	DocumentHandler *documents.Handler
 	UsageHandler    *usage.Handler
+	ResumesHandler  *resumes.Handler
 	UserHandler     *users.Handler
 	GoogleAuth      *googleauth.GoogleService
 }
@@ -68,6 +70,7 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 	deps.AnalysisHandler.RegisterRoutes(api)
 	deps.UserHandler.RegisterRoutes(api)
 	deps.UsageHandler.RegisterRoutes(api)
+	deps.ResumesHandler.RegisterRoutes(api)
 	deps.ApplyHandler.RegisterRoutes(api)
 	if cfg.Env == "dev" {
 		dev := api.Group("/dev")

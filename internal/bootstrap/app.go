@@ -22,6 +22,7 @@ import (
 	"resume-backend/internal/llm"
 	openai "resume-backend/internal/llm/openai"
 	"resume-backend/internal/queue"
+	"resume-backend/internal/resumes"
 	"resume-backend/internal/shared/config"
 	sharedcrypto "resume-backend/internal/shared/crypto"
 	"resume-backend/internal/shared/server"
@@ -51,12 +52,14 @@ type App struct {
 	DocumentsRepo           documents.DocumentsRepo
 	AnalysesRepo            analyses.Repo
 	GeneratedResumesRepo    generatedresumes.Repo
+	ResumesRepo             resumes.Repo
 	UsersRepo               users.Repo
 	DocumentsService        *documents.Service
 	UsageService            *usage.Service
 	AnalysesService         *analyses.Service
 	AnalysisProcessor       AnalysisProcessor
 	GeneratedResumesService *generatedresumes.Service
+	ResumesService          *resumes.Service
 	ApplyService            *applies.Service
 	AccountService          *account.Service
 	UsersService            *users.Service
@@ -65,6 +68,7 @@ type App struct {
 	ApplyHandler            *applies.Handler
 	AccountHandler          *account.Handler
 	UsageHandler            *usage.Handler
+	ResumesHandler          *resumes.Handler
 	UsersHandler            *users.Handler
 	GoogleAuth              *googleauth.GoogleService
 	Services                map[string]any
@@ -128,6 +132,7 @@ func Build(cfg config.Config) (*App, error) {
 		ApplyHandler:    app.ApplyHandler,
 		DocumentHandler: app.DocumentsHandler,
 		UsageHandler:    app.UsageHandler,
+		ResumesHandler:  app.ResumesHandler,
 		UserHandler:     app.UsersHandler,
 		GoogleAuth:      app.GoogleAuth,
 	})
@@ -225,17 +230,20 @@ func buildServices(app *App) error {
 	var docRepo documents.DocumentsRepo
 	var analysisRepo analyses.Repo
 	var generatedResumeRepo generatedresumes.Repo
+	var resumeRepo resumes.Repo
 	var userRepo users.Repo
 
 	if app.DB != nil {
 		docRepo = &documents.PGRepo{DB: app.DB}
 		analysisRepo = &analyses.PGRepo{DB: app.DB}
 		generatedResumeRepo = &generatedresumes.PGRepo{DB: app.DB}
+		resumeRepo = &resumes.PGRepo{DB: app.DB}
 		userRepo = &users.PGRepo{DB: app.DB}
 	} else {
 		docRepo = documents.NewMemoryRepo()
 		analysisRepo = analyses.NewMemoryRepo()
 		generatedResumeRepo = generatedresumes.NewMemoryRepo()
+		resumeRepo = resumes.NewMemoryRepo()
 		userRepo = users.NewMemoryRepo()
 	}
 
@@ -297,6 +305,7 @@ func buildServices(app *App) error {
 		DocRepo:      docRepo,
 		Store:        app.Store,
 	}
+	resumeSvc := &resumes.Service{Repo: resumeRepo}
 
 	usageHandler := usage.NewHandler(usageSvc, analysisAdapter, docRepo, app.Store, generatedResumeSvc)
 	applySvc := &applies.Service{
@@ -319,12 +328,14 @@ func buildServices(app *App) error {
 	app.DocumentsRepo = docRepo
 	app.AnalysesRepo = analysisRepo
 	app.GeneratedResumesRepo = generatedResumeRepo
+	app.ResumesRepo = resumeRepo
 	app.UsersRepo = userRepo
 	app.DocumentsService = docSvc
 	app.UsageService = usageSvc
 	app.AnalysesService = analysisSvc
 	app.AnalysisProcessor = analysisSvc
 	app.GeneratedResumesService = generatedResumeSvc
+	app.ResumesService = resumeSvc
 	app.ApplyService = applySvc
 	app.AccountService = account.NewService(docRepo, analysisRepo)
 	app.UsersService = userSvc
@@ -333,6 +344,7 @@ func buildServices(app *App) error {
 	app.ApplyHandler = applies.NewHandler(applySvc, generatedResumeRepo, app.Store)
 	app.AccountHandler = account.NewHandler(app.AccountService)
 	app.UsageHandler = usageHandler
+	app.ResumesHandler = resumes.NewHandler(resumeSvc)
 	app.UsersHandler = users.NewHandler(userSvc)
 	app.GoogleAuth = googleAuthSvc
 
