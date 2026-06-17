@@ -14,16 +14,61 @@ import (
 
 type Service struct {
 	Repo Repo
+	LLM  LLMClient
+}
+
+type createResumeOptions struct {
+	SourceType      string
+	ChangeSummary   map[string]any
+	SourceResumeID  string
+	SourceVersionID string
+	OriginType      string
 }
 
 func (s *Service) Create(ctx context.Context, ownerID, title string, resume modelv1.ResumeModel) (SaveResult, error) {
+	return s.createWithSource(ctx, ownerID, title, resume, SourceManual)
+}
+
+func (s *Service) createWithSource(ctx context.Context, ownerID, title string, resume modelv1.ResumeModel, sourceType string) (SaveResult, error) {
+	return s.createWithOptions(ctx, ownerID, title, resume, createResumeOptions{
+		SourceType: sourceType,
+		OriginType: originTypeForSourceType(sourceType),
+	})
+}
+
+func (s *Service) createWithSourceAndSummary(ctx context.Context, ownerID, title string, resume modelv1.ResumeModel, sourceType string, changeSummary map[string]any) (SaveResult, error) {
+	return s.createWithOptions(ctx, ownerID, title, resume, createResumeOptions{
+		SourceType:    sourceType,
+		ChangeSummary: changeSummary,
+		OriginType:    originTypeForSourceType(sourceType),
+	})
+}
+
+func (s *Service) createWithOptions(ctx context.Context, ownerID, title string, resume modelv1.ResumeModel, opts createResumeOptions) (SaveResult, error) {
 	ownerID = strings.TrimSpace(ownerID)
 	title = strings.TrimSpace(title)
+	opts.SourceType = strings.TrimSpace(opts.SourceType)
+	opts.SourceResumeID = strings.TrimSpace(opts.SourceResumeID)
+	opts.SourceVersionID = strings.TrimSpace(opts.SourceVersionID)
+	opts.OriginType = strings.TrimSpace(opts.OriginType)
 	if ownerID == "" || title == "" {
 		return SaveResult{}, ErrInvalidInput
 	}
 	if utf8.RuneCountInString(title) > maxTitleLength {
 		return SaveResult{}, ErrInvalidInput
+	}
+	if !validSourceType(opts.SourceType) || !validOriginType(opts.OriginType) {
+		return SaveResult{}, ErrInvalidInput
+	}
+	if opts.SourceResumeID != "" {
+		if _, err := uuid.Parse(opts.SourceResumeID); err != nil {
+			return SaveResult{}, ErrInvalidInput
+		}
+	}
+	if opts.SourceVersionID != "" {
+		if _, err := uuid.Parse(opts.SourceVersionID); err != nil {
+			return SaveResult{}, ErrInvalidInput
+		}
 	}
 	if errs := modelv1.ValidateStructure(resume); len(errs) > 0 {
 		return SaveResult{}, ValidationError{Errors: errs}
@@ -37,18 +82,23 @@ func (s *Service) Create(ctx context.Context, ownerID, title string, resume mode
 		OwnerID:          ownerID,
 		Title:            title,
 		Status:           StatusDraft,
+		SourceResumeID:   opts.SourceResumeID,
+		SourceVersionID:  opts.SourceVersionID,
+		OriginType:       opts.OriginType,
 		CurrentVersionID: versionID,
 		CurrentResume:    resume,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
 	version := ResumeVersion{
-		ID:            versionID,
-		ResumeID:      resumeID,
-		VersionNumber: 1,
-		SourceType:    SourceManual,
-		Resume:        resume,
-		CreatedAt:     now,
+		ID:              versionID,
+		ResumeID:        resumeID,
+		VersionNumber:   1,
+		SourceType:      opts.SourceType,
+		SourceVersionID: opts.SourceVersionID,
+		Resume:          resume,
+		ChangeSummary:   opts.ChangeSummary,
+		CreatedAt:       now,
 	}
 
 	created, err := s.Repo.Create(ctx, record, version)
@@ -59,6 +109,21 @@ func (s *Service) Create(ctx context.Context, ownerID, title string, resume mode
 		Resume:            created,
 		ReadinessWarnings: modelv1.ValidateReadiness(resume),
 	}, nil
+}
+
+func originTypeForSourceType(sourceType string) string {
+	switch sourceType {
+	case SourceManual:
+		return OriginManual
+	case SourceParsedFromUpload:
+		return OriginParsedFromUpload
+	case SourceAIGenerated:
+		return OriginAIGenerated
+	case SourceAITailored:
+		return OriginAITailored
+	default:
+		return ""
+	}
 }
 
 func (s *Service) Update(ctx context.Context, ownerID, resumeID, title string, resume modelv1.ResumeModel, changeSummary map[string]any) (SaveResult, error) {
@@ -149,9 +214,8 @@ func (s *Service) ExportDOCX(ctx context.Context, ownerID, resumeID string) (Exp
 		return ExportResult{}, err
 	}
 	return ExportResult{
-		FileName:          exportFileName(resume.Title),
-		DocxBytes:         docxBytes,
-		ReadinessWarnings: modelv1.ValidateReadiness(resume.CurrentResume),
+		FileName:  exportFileName(resume.Title),
+		DocxBytes: docxBytes,
 	}, nil
 }
 

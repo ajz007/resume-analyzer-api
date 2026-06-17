@@ -16,6 +16,9 @@ func (r *PGRepo) Create(ctx context.Context, resume Resume, version ResumeVersio
 	if !validSourceType(version.SourceType) {
 		return Resume{}, ErrInvalidInput
 	}
+	if !validOriginType(resume.OriginType) {
+		return Resume{}, ErrInvalidInput
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Resume{}, err
@@ -37,13 +40,16 @@ func (r *PGRepo) Create(ctx context.Context, resume Resume, version ResumeVersio
 
 	const insertResume = `
 INSERT INTO resumes (
-    id, owner_id, title, status, current_version_id, current_resume_json, created_at, updated_at
-) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)`
+    id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10)`
 	if _, err := tx.ExecContext(ctx, insertResume,
 		resume.ID,
 		resume.OwnerID,
 		resume.Title,
 		resume.Status,
+		nullableStringValue(resume.SourceResumeID),
+		nullableStringValue(resume.SourceVersionID),
+		nullableStringValue(resume.OriginType),
 		resumeJSON,
 		resume.CreatedAt,
 		resume.UpdatedAt,
@@ -53,13 +59,14 @@ INSERT INTO resumes (
 
 	const insertVersion = `
 INSERT INTO resume_versions (
-    id, resume_id, version_number, source_type, resume_json, change_summary, parent_version_id, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, NULL, $7)`
+    id, resume_id, version_number, source_type, source_version_id, resume_json, change_summary, parent_version_id, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8)`
 	if _, err := tx.ExecContext(ctx, insertVersion,
 		version.ID,
 		version.ResumeID,
 		version.VersionNumber,
 		version.SourceType,
+		nullableStringValue(version.SourceVersionID),
 		versionJSON,
 		changeSummaryJSON,
 		version.CreatedAt,
@@ -93,7 +100,7 @@ func (r *PGRepo) Update(ctx context.Context, ownerID, resumeID, title string, ve
 	defer tx.Rollback()
 
 	const selectResume = `
-SELECT id, owner_id, title, status, current_version_id, current_resume_json, created_at, updated_at
+SELECT id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
 FROM resumes
 WHERE id = $1
 FOR UPDATE`
@@ -131,13 +138,14 @@ WHERE resume_id = $1`
 
 	const insertVersion = `
 INSERT INTO resume_versions (
-    id, resume_id, version_number, source_type, resume_json, change_summary, parent_version_id, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+    id, resume_id, version_number, source_type, source_version_id, resume_json, change_summary, parent_version_id, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	if _, err := tx.ExecContext(ctx, insertVersion,
 		version.ID,
 		resumeID,
 		version.VersionNumber,
 		version.SourceType,
+		nullableStringValue(version.SourceVersionID),
 		versionJSON,
 		changeSummaryJSON,
 		nullableString(version.ParentVersionID),
@@ -170,7 +178,7 @@ WHERE id = $5`
 
 func (r *PGRepo) GetByID(ctx context.Context, ownerID, resumeID string) (Resume, error) {
 	const query = `
-SELECT id, owner_id, title, status, current_version_id, current_resume_json, created_at, updated_at
+SELECT id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
 FROM resumes
 WHERE id = $1
 LIMIT 1`
@@ -187,7 +195,7 @@ LIMIT 1`
 func (r *PGRepo) ListByOwner(ctx context.Context, ownerID string, limit, offset int) ([]Resume, error) {
 	limit, offset = normalizeLimitOffset(limit, offset)
 	const query = `
-SELECT id, owner_id, title, status, current_version_id, current_resume_json, created_at, updated_at
+SELECT id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
 FROM resumes
 WHERE owner_id = $1
 ORDER BY updated_at DESC
@@ -214,7 +222,7 @@ func (r *PGRepo) ListVersions(ctx context.Context, ownerID, resumeID string) ([]
 		return nil, err
 	}
 	const query = `
-SELECT id, resume_id, version_number, source_type, resume_json, change_summary, parent_version_id, created_at
+SELECT id, resume_id, version_number, source_type, source_version_id, resume_json, change_summary, parent_version_id, created_at
 FROM resume_versions
 WHERE resume_id = $1
 ORDER BY version_number DESC`
@@ -240,7 +248,7 @@ func (r *PGRepo) GetVersionByID(ctx context.Context, ownerID, resumeID, versionI
 		return ResumeVersion{}, err
 	}
 	const query = `
-SELECT id, resume_id, version_number, source_type, resume_json, change_summary, parent_version_id, created_at
+SELECT id, resume_id, version_number, source_type, source_version_id, resume_json, change_summary, parent_version_id, created_at
 FROM resume_versions
 WHERE resume_id = $1 AND id = $2
 LIMIT 1`
@@ -258,12 +266,18 @@ type rowScanner interface {
 func scanResume(row rowScanner) (Resume, error) {
 	var resume Resume
 	var versionID sql.NullString
+	var sourceResumeID sql.NullString
+	var sourceVersionID sql.NullString
+	var originType sql.NullString
 	var raw []byte
 	err := row.Scan(
 		&resume.ID,
 		&resume.OwnerID,
 		&resume.Title,
 		&resume.Status,
+		&sourceResumeID,
+		&sourceVersionID,
+		&originType,
 		&versionID,
 		&raw,
 		&resume.CreatedAt,
@@ -274,6 +288,15 @@ func scanResume(row rowScanner) (Resume, error) {
 			return Resume{}, ErrNotFound
 		}
 		return Resume{}, err
+	}
+	if sourceResumeID.Valid {
+		resume.SourceResumeID = sourceResumeID.String
+	}
+	if sourceVersionID.Valid {
+		resume.SourceVersionID = sourceVersionID.String
+	}
+	if originType.Valid {
+		resume.OriginType = originType.String
 	}
 	if versionID.Valid {
 		resume.CurrentVersionID = versionID.String
@@ -293,11 +316,13 @@ func scanVersion(row rowScanner) (ResumeVersion, error) {
 	var raw []byte
 	var changeRaw []byte
 	var parent sql.NullString
+	var sourceVersionID sql.NullString
 	err := row.Scan(
 		&version.ID,
 		&version.ResumeID,
 		&version.VersionNumber,
 		&version.SourceType,
+		&sourceVersionID,
 		&raw,
 		&changeRaw,
 		&parent,
@@ -311,6 +336,9 @@ func scanVersion(row rowScanner) (ResumeVersion, error) {
 	}
 	if parent.Valid {
 		version.ParentVersionID = &parent.String
+	}
+	if sourceVersionID.Valid {
+		version.SourceVersionID = sourceVersionID.String
 	}
 	if len(changeRaw) > 0 {
 		if err := json.Unmarshal(changeRaw, &version.ChangeSummary); err != nil {
@@ -339,6 +367,13 @@ func nullableString(value *string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: *value, Valid: true}
+}
+
+func nullableStringValue(value string) sql.NullString {
+	if value == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: value, Valid: true}
 }
 
 var _ Repo = (*PGRepo)(nil)

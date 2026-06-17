@@ -305,7 +305,10 @@ func buildServices(app *App) error {
 		DocRepo:      docRepo,
 		Store:        app.Store,
 	}
-	resumeSvc := &resumes.Service{Repo: resumeRepo}
+	resumeSvc := &resumes.Service{
+		Repo: resumeRepo,
+		LLM:  applyLLMClient,
+	}
 
 	usageHandler := usage.NewHandler(usageSvc, analysisAdapter, docRepo, app.Store, generatedResumeSvc)
 	applySvc := &applies.Service{

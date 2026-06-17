@@ -8,6 +8,11 @@ import (
 
 const (
 	StatusDraft            = "draft"
+	OriginBlank            = "blank"
+	OriginManual           = "manual"
+	OriginParsedFromUpload = "parsed_from_upload"
+	OriginAIGenerated      = "ai_generated"
+	OriginAITailored       = "ai_tailored"
 	SourceManual           = "manual"
 	SourceParsedFromUpload = "parsed_from_upload"
 	SourceAIGenerated      = "ai_generated"
@@ -28,8 +33,24 @@ var allowedSourceTypes = map[string]struct{}{
 	SourceExportSnapshot:   {},
 }
 
+var allowedOriginTypes = map[string]struct{}{
+	OriginBlank:            {},
+	OriginManual:           {},
+	OriginParsedFromUpload: {},
+	OriginAIGenerated:      {},
+	OriginAITailored:       {},
+}
+
 func validSourceType(sourceType string) bool {
 	_, ok := allowedSourceTypes[sourceType]
+	return ok
+}
+
+func validOriginType(originType string) bool {
+	if originType == "" {
+		return true
+	}
+	_, ok := allowedOriginTypes[originType]
 	return ok
 }
 
@@ -38,6 +59,9 @@ type Resume struct {
 	OwnerID          string
 	Title            string
 	Status           string
+	SourceResumeID   string
+	SourceVersionID  string
+	OriginType       string
 	CurrentVersionID string
 	CurrentResume    modelv1.ResumeModel
 	CreatedAt        time.Time
@@ -49,6 +73,7 @@ type ResumeVersion struct {
 	ResumeID        string
 	VersionNumber   int
 	SourceType      string
+	SourceVersionID string
 	Resume          modelv1.ResumeModel
 	ChangeSummary   map[string]any
 	ParentVersionID *string
@@ -61,7 +86,6 @@ type SaveResult struct {
 }
 
 type ExportResult struct {
-	FileName          string
-	DocxBytes         []byte
-	ReadinessWarnings []modelv1.ValidationWarning
+	FileName  string
+	DocxBytes []byte
 }

@@ -31,6 +31,9 @@ func (r *MemoryRepo) Create(ctx context.Context, resume Resume, version ResumeVe
 	if !validSourceType(version.SourceType) {
 		return Resume{}, ErrInvalidInput
 	}
+	if !validOriginType(resume.OriginType) {
+		return Resume{}, ErrInvalidInput
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
