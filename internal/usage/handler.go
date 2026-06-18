@@ -67,10 +67,13 @@ func (h *Handler) getUsage(c *gin.Context) {
 	}
 
 	respond.JSON(c, http.StatusOK, gin.H{
-		"plan":     u.Plan,
-		"limit":    u.Limit,
-		"used":     u.Used,
-		"resetsAt": u.ResetsAt,
+		"plan":            u.Plan,
+		"limit":           u.Limit,
+		"used":            u.Used,
+		"remaining":       maxRemaining(u),
+		"resetsAt":        u.ResetsAt,
+		"isAuthenticated": !IsGuestUserID(userID),
+		"userType":        usageUserType(userID),
 	})
 }
 
@@ -88,11 +91,29 @@ func (h *Handler) resetUsage(c *gin.Context) {
 	}
 
 	respond.JSON(c, http.StatusOK, gin.H{
-		"plan":     u.Plan,
-		"limit":    u.Limit,
-		"used":     u.Used,
-		"resetsAt": u.ResetsAt,
+		"plan":            u.Plan,
+		"limit":           u.Limit,
+		"used":            u.Used,
+		"remaining":       maxRemaining(u),
+		"resetsAt":        u.ResetsAt,
+		"isAuthenticated": !IsGuestUserID(userID),
+		"userType":        usageUserType(userID),
 	})
+}
+
+func maxRemaining(u Usage) int {
+	remaining := u.Limit - u.Used
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func usageUserType(userID string) string {
+	if IsGuestUserID(userID) {
+		return "guest"
+	}
+	return "authenticated"
 }
 
 type applyExecuteRequest struct {

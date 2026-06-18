@@ -11,6 +11,7 @@ ADD COLUMN IF NOT EXISTS origin_type TEXT NULL;
 ALTER TABLE resume_versions
 ADD COLUMN IF NOT EXISTS source_version_id UUID NULL;
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -63,6 +64,7 @@ BEGIN
         ));
     END IF;
 END $$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_resumes_source_resume_id ON resumes(source_resume_id);
 CREATE INDEX IF NOT EXISTS idx_resumes_source_version_id ON resumes(source_version_id);

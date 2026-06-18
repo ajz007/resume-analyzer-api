@@ -59,6 +59,32 @@ func TestResumesCreateSuccess(t *testing.T) {
 	}
 }
 
+func TestResumesCreateGuestRejected(t *testing.T) {
+	router := newTestRouter(t)
+
+	resp := performGuestJSON(t, router, http.MethodPost, "/api/v1/resumes", "guest-123", map[string]any{
+		"title":  "Guest Resume",
+		"resume": validResume(),
+	})
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesCreateWithoutAuthRejected(t *testing.T) {
+	router := newTestRouter(t)
+
+	resp := performWithoutAuthJSON(t, router, http.MethodPost, "/api/v1/resumes", map[string]any{
+		"title":  "Anonymous Resume",
+		"resume": validResume(),
+	})
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestResumesCreateStructuralValidationFailure(t *testing.T) {
 	router := newTestRouter(t)
 	resume := validResume()
@@ -155,6 +181,26 @@ func TestResumesGenerateValidResponseCreatesResume(t *testing.T) {
 	}
 	if versions[0].SourceType != resumespkg.SourceAIGenerated {
 		t.Fatalf("expected source type %q, got %q", resumespkg.SourceAIGenerated, versions[0].SourceType)
+	}
+}
+
+func TestResumesGenerateGuestRejected(t *testing.T) {
+	app := newTestApp(t)
+
+	resp := performGuestJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "guest-123", generateRequestBody())
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesGenerateWithoutAuthRejected(t *testing.T) {
+	app := newTestApp(t)
+
+	resp := performWithoutAuthJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", generateRequestBody())
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -707,6 +753,28 @@ func TestResumesTailorForbiddenForDifferentOwner(t *testing.T) {
 	}
 }
 
+func TestResumesTailorGuestRejected(t *testing.T) {
+	app := newTestApp(t)
+	created := createResume(t, app.Router, "google:owner", "Backend Engineer Resume", validResume())
+
+	resp := performGuestJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/"+created.ID+"/tailor", "guest-123", tailorRequestBody())
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesTailorWithoutAuthRejected(t *testing.T) {
+	app := newTestApp(t)
+	created := createResume(t, app.Router, "google:owner", "Backend Engineer Resume", validResume())
+
+	resp := performWithoutAuthJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/"+created.ID+"/tailor", tailorRequestBody())
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestResumesTailorReturnsReadinessWarnings(t *testing.T) {
 	app := newTestApp(t)
 	ownerID := "google:12345"
@@ -796,6 +864,26 @@ func TestResumesListOnlyReturnsOwnerResumes(t *testing.T) {
 	}
 	if list[0]["originType"] != resumespkg.OriginManual {
 		t.Fatalf("expected manual origin type, got %#v", list[0]["originType"])
+	}
+}
+
+func TestResumesListGuestRejected(t *testing.T) {
+	router := newTestRouter(t)
+
+	resp := performGuestJSON(t, router, http.MethodGet, "/api/v1/resumes", "guest-123", nil)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesListWithoutAuthRejected(t *testing.T) {
+	router := newTestRouter(t)
+
+	resp := performWithoutAuthJSON(t, router, http.MethodGet, "/api/v1/resumes", nil)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -911,6 +999,28 @@ func TestResumesExportDOCXForbiddenForDifferentOwner(t *testing.T) {
 	if resp.Code != http.StatusForbidden {
 		// Existing resume service convention is 403 for cross-owner access.
 		t.Fatalf("expected status 403, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesExportDOCXGuestRejected(t *testing.T) {
+	router := newTestRouter(t)
+	created := createResume(t, router, "google:owner", "Owner Resume", validResume())
+
+	resp := performGuestJSON(t, router, http.MethodPost, "/api/v1/resumes/"+created.ID+"/export/docx", "guest-123", nil)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesExportDOCXWithoutAuthRejected(t *testing.T) {
+	router := newTestRouter(t)
+	created := createResume(t, router, "google:owner", "Owner Resume", validResume())
+
+	resp := performWithoutAuthJSON(t, router, http.MethodPost, "/api/v1/resumes/"+created.ID+"/export/docx", nil)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -1058,6 +1168,43 @@ func performJSON(t *testing.T, router *gin.Engine, method, path, ownerID string,
 		t.Fatalf("sign jwt: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+func performGuestJSON(t *testing.T, router *gin.Engine, method, path, guestID string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var payload bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&payload).Encode(body); err != nil {
+			t.Fatalf("encode body: %v", err)
+		}
+	}
+	req := httptest.NewRequest(method, path, &payload)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Guest-Id", guestID)
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+func performWithoutAuthJSON(t *testing.T, router *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var payload bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&payload).Encode(body); err != nil {
+			t.Fatalf("encode body: %v", err)
+		}
+	}
+	req := httptest.NewRequest(method, path, &payload)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
