@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,10 +17,12 @@ import (
 	"resume-backend/internal/documents"
 	"resume-backend/internal/llm"
 	"resume-backend/internal/queue"
+	"resume-backend/internal/shared/auth"
 	sharedcrypto "resume-backend/internal/shared/crypto"
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/storage/object"
 	local "resume-backend/internal/shared/storage/object/local"
+	"resume-backend/internal/usage"
 )
 
 func TestStartAnalysisDefaults(t *testing.T) {
@@ -435,6 +438,59 @@ func TestStartAnalysisFailedRequiresRetry(t *testing.T) {
 
 	if resp.Code != http.StatusConflict {
 		t.Fatalf("expected status 409, got %d", resp.Code)
+	}
+}
+
+func TestGuestUserCanRunAnalysesOneThroughThreeAndIsBlockedOnFour(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, docRepo, _, store, _ := setupAnalysisRouter(t)
+	for i := 1; i <= 4; i++ {
+		documentID := seedDocumentWithSuffix(t, docRepo, store, "guest:test-guest", strconv.Itoa(i))
+		req := newAnalysisRequest(t, documentID, map[string]string{
+			"jobDescription": strings.Repeat("a", 300),
+		})
+		addGuestHeader(req)
+
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if i <= 3 && resp.Code != http.StatusAccepted {
+			t.Fatalf("expected request %d to be accepted, got %d: %s", i, resp.Code, resp.Body.String())
+		}
+		if i == 4 {
+			if resp.Code != http.StatusTooManyRequests {
+				t.Fatalf("expected request 4 to be blocked, got %d: %s", resp.Code, resp.Body.String())
+			}
+			assertUsageLimitError(t, resp, "You've used your 3 free guest analyses this month. Sign in to continue with 15 free analyses/month and save your history.")
+		}
+	}
+}
+
+func TestAuthenticatedFreeUserCanRunAnalysesUpToFifteenAndIsBlockedOnSixteen(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, docRepo, _, store, _ := setupAnalysisRouter(t)
+	userID := "google:quota-user"
+	for i := 1; i <= 16; i++ {
+		documentID := seedDocumentWithSuffix(t, docRepo, store, userID, strconv.Itoa(i))
+		req := newAnalysisRequest(t, documentID, map[string]string{
+			"jobDescription": strings.Repeat("a", 300),
+		})
+		addAuthHeader(t, req, userID)
+
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if i <= 15 && resp.Code != http.StatusAccepted {
+			t.Fatalf("expected request %d to be accepted, got %d: %s", i, resp.Code, resp.Body.String())
+		}
+		if i == 16 {
+			if resp.Code != http.StatusTooManyRequests {
+				t.Fatalf("expected request 16 to be blocked, got %d: %s", resp.Code, resp.Body.String())
+			}
+			assertUsageLimitError(t, resp, "You've used your 15 free analyses this month.")
+		}
 	}
 }
 
@@ -883,6 +939,7 @@ func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *Mem
 	queueStub := &stubQueue{}
 	svc := &Service{
 		Repo:             analysisRepo,
+		Usage:            usage.NewService(),
 		DocRepo:          docRepo,
 		Store:            store,
 		LLM:              stubLLM{},
@@ -902,13 +959,22 @@ func setupAnalysisRouter(t *testing.T) (*gin.Engine, *documents.MemoryRepo, *Mem
 
 func seedDocument(t *testing.T, repo *documents.MemoryRepo, store object.ObjectStore, userID string) string {
 	t.Helper()
+	return seedDocumentWithSuffix(t, repo, store, userID, "")
+}
+
+func seedDocumentWithSuffix(t *testing.T, repo *documents.MemoryRepo, store object.ObjectStore, userID, suffix string) string {
+	t.Helper()
 
 	extractedKey, _, _, err := store.Save(context.Background(), userID, "resume.txt", bytes.NewReader([]byte("resume text")))
 	if err != nil {
 		t.Fatalf("save extracted text: %v", err)
 	}
+	docID := "doc-" + userID
+	if suffix != "" {
+		docID += "-" + suffix
+	}
 	doc := documents.Document{
-		ID:               "doc-" + userID,
+		ID:               docID,
 		UserID:           userID,
 		FileName:         "resume.pdf",
 		MimeType:         "application/pdf",
@@ -925,4 +991,43 @@ func seedDocument(t *testing.T, repo *documents.MemoryRepo, store object.ObjectS
 
 func addGuestHeader(req *http.Request) {
 	req.Header.Set("X-Guest-Id", "test-guest")
+}
+
+func addAuthHeader(t *testing.T, req *http.Request, userID string) {
+	t.Helper()
+	token, err := auth.SignJWT(auth.Claims{Sub: userID})
+	if err != nil {
+		t.Fatalf("sign jwt: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+}
+
+func newAnalysisRequest(t *testing.T, documentID string, payload map[string]string) *http.Request {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+documentID+"/analyze", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func assertUsageLimitError(t *testing.T, resp *httptest.ResponseRecorder, message string) {
+	t.Helper()
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v; body=%s", err, resp.Body.String())
+	}
+	if payload.Error.Code != "USAGE_LIMIT_REACHED" {
+		t.Fatalf("expected error code USAGE_LIMIT_REACHED, got %q", payload.Error.Code)
+	}
+	if payload.Error.Message != message {
+		t.Fatalf("expected error message %q, got %q", message, payload.Error.Message)
+	}
 }

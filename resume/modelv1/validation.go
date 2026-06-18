@@ -256,13 +256,23 @@ func ValidateStructure(model ResumeModel) []ValidationError {
 		}
 	}
 
+	seenSectionKeys := map[string]int{}
 	for i, key := range model.SectionOrder {
 		if !knownSectionKeys[key] {
 			errs = append(errs, ValidationError{
 				Field:   fmt.Sprintf("sectionOrder[%d]", i),
 				Message: "unknown section key",
 			})
+			continue
 		}
+		if previous, ok := seenSectionKeys[key]; ok {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("sectionOrder[%d]", i),
+				Message: fmt.Sprintf("duplicate section key also used at sectionOrder[%d]", previous),
+			})
+			continue
+		}
+		seenSectionKeys[key] = i
 	}
 
 	return errs
@@ -304,6 +314,9 @@ func ValidateReadiness(model ResumeModel) []ValidationWarning {
 		}
 		if exp.IsCurrent && strings.TrimSpace(exp.StartDate) == "" {
 			addWarning(prefix+".startDate", "current job has empty start date")
+		}
+		if exp.IsCurrent && strings.TrimSpace(exp.EndDate) != "" {
+			addWarning(prefix+".endDate", "current job should not have an end date")
 		}
 		if !exp.IsCurrent && strings.TrimSpace(exp.EndDate) == "" {
 			addWarning(prefix+".endDate", "non-current job has empty end date")

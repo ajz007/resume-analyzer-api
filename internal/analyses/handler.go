@@ -136,7 +136,7 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		case errors.Is(err, ErrJobQueueNotConfigured):
 			respond.Error(c, http.StatusInternalServerError, "internal_error", err.Error(), err)
 		case errors.Is(err, usage.ErrLimitReached):
-			respond.Error(c, http.StatusTooManyRequests, "limit_reached", "You've reached your analysis limit. Upgrade your plan to continue.", []map[string]string{
+			respond.Error(c, http.StatusTooManyRequests, "USAGE_LIMIT_REACHED", usageLimitReachedMessage(userID), []map[string]string{
 				{"field": "usage", "issue": "limit_reached"},
 			})
 		default:
@@ -164,6 +164,13 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		"status":      analysis.Status,
 		"pollAfterMs": defaultPollAfterMs,
 	})
+}
+
+func usageLimitReachedMessage(userID string) string {
+	if usage.IsGuestUserID(userID) {
+		return "You've used your 3 free guest analyses this month. Sign in to continue with 15 free analyses/month and save your history."
+	}
+	return "You've used your 15 free analyses this month."
 }
 
 func (h *Handler) getAnalysis(c *gin.Context) {

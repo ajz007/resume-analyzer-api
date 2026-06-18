@@ -47,11 +47,19 @@ func (s *memoryStore) ensure(ctx context.Context, userID string) (Usage, error) 
 	defer s.mu.Unlock()
 	u, ok := s.data[userID]
 	if !ok {
-		u = defaultUsage()
+		u = defaultUsage(userID)
+	}
+	expectedPlan := defaultPlan(userID)
+	expectedLimit := defaultLimit(userID)
+	if u.Plan != expectedPlan {
+		u.Plan = expectedPlan
+	}
+	if u.Limit != expectedLimit {
+		u.Limit = expectedLimit
 	}
 	if now.After(u.ResetsAt) || now.Equal(u.ResetsAt) {
 		u.Used = 0
-		u.ResetsAt = now.Add(7 * 24 * time.Hour)
+		u.ResetsAt = nextMonthlyReset(now)
 	}
 	s.data[userID] = u
 	return u, nil
@@ -69,11 +77,19 @@ func (s *memoryStore) Consume(ctx context.Context, userID string, n int) (Usage,
 	now := time.Now().UTC()
 	u, ok := s.data[userID]
 	if !ok {
-		u = defaultUsage()
+		u = defaultUsage(userID)
+	}
+	expectedPlan := defaultPlan(userID)
+	expectedLimit := defaultLimit(userID)
+	if u.Plan != expectedPlan {
+		u.Plan = expectedPlan
+	}
+	if u.Limit != expectedLimit {
+		u.Limit = expectedLimit
 	}
 	if now.After(u.ResetsAt) || now.Equal(u.ResetsAt) {
 		u.Used = 0
-		u.ResetsAt = now.Add(7 * 24 * time.Hour)
+		u.ResetsAt = nextMonthlyReset(now)
 	}
 	if u.Used+n > u.Limit {
 		return Usage{}, ErrLimitReached
@@ -92,10 +108,12 @@ func (s *memoryStore) Reset(ctx context.Context, userID string) (Usage, error) {
 	defer s.mu.Unlock()
 	u, ok := s.data[userID]
 	if !ok {
-		u = defaultUsage()
+		u = defaultUsage(userID)
 	}
+	u.Plan = defaultPlan(userID)
+	u.Limit = defaultLimit(userID)
 	u.Used = 0
-	u.ResetsAt = now.Add(7 * 24 * time.Hour)
+	u.ResetsAt = nextMonthlyReset(now)
 	s.data[userID] = u
 	return u, nil
 }

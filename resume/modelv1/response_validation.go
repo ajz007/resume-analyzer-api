@@ -64,8 +64,7 @@ func ValidateResumeTailoringResponse(response ResumeTailoringResponse) []Validat
 		errs = appendRequiredEnumError(errs, prefix+".section", change.Section, knownSectionKeys)
 		errs = appendRequiredStringError(errs, prefix+".itemId", change.ItemID)
 		errs = appendRequiredEnumError(errs, prefix+".changeType", change.ChangeType, tailoringChangeTypes)
-		errs = appendRequiredStringError(errs, prefix+".before", change.Before)
-		errs = appendRequiredStringError(errs, prefix+".after", change.After)
+		errs = appendChangeContentErrors(errs, prefix, change)
 		errs = appendRequiredStringError(errs, prefix+".reason", change.Reason)
 		errs = appendRequiredEnumError(errs, prefix+".risk", change.Risk, tailoringRisks)
 		errs = appendMaxLengthError(errs, prefix+".itemId", change.ItemID, 120)
@@ -87,6 +86,23 @@ func ValidateResumeTailoringResponse(response ResumeTailoringResponse) []Validat
 		errs = appendMaxLengthError(errs, field, warning.Message, 500)
 	}
 
+	return errs
+}
+
+func appendChangeContentErrors(errs []ValidationError, prefix string, change TailoringChange) []ValidationError {
+	switch change.ChangeType {
+	case "rewrite":
+		errs = appendRequiredStringError(errs, prefix+".before", change.Before)
+		errs = appendRequiredStringError(errs, prefix+".after", change.After)
+	case "add":
+		errs = appendRequiredStringError(errs, prefix+".after", change.After)
+	case "remove":
+		errs = appendRequiredStringError(errs, prefix+".before", change.Before)
+	case "reorder", "no_change":
+		return errs
+	default:
+		return errs
+	}
 	return errs
 }
 

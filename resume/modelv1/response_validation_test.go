@@ -98,6 +98,57 @@ func TestValidateResumeTailoringResponseInvalidEmbeddedResume(t *testing.T) {
 	assertStructuralError(t, ValidateResumeTailoringResponse(response), "tailoredResume.schemaVersion")
 }
 
+func TestValidateResumeTailoringResponseChangeTypeContentRules(t *testing.T) {
+	response := ResumeTailoringResponse{
+		TailoredResume: completeResume(),
+		Changes: []TailoringChange{
+			{
+				Section:    "skills",
+				ItemID:     "skills",
+				ChangeType: "add",
+				After:      "Added Go to Backend skills.",
+				Reason:     "Skill was present in source material.",
+				Risk:       "safe",
+			},
+			{
+				Section:    "summary",
+				ItemID:     "summary",
+				ChangeType: "remove",
+				Before:     "Removed unsupported claim.",
+				Reason:     "Claim was not supported by source material.",
+				Risk:       "needs_user_confirmation",
+			},
+			{
+				Section:    "experience",
+				ItemID:     "exp-1",
+				ChangeType: "reorder",
+				Reason:     "Moved the most relevant role first.",
+				Risk:       "safe",
+			},
+			{
+				Section:    "education",
+				ItemID:     "education-1",
+				ChangeType: "no_change",
+				Reason:     "Education already matches the target role.",
+				Risk:       "safe",
+			},
+		},
+	}
+
+	if errs := ValidateResumeTailoringResponse(response); len(errs) != 0 {
+		t.Fatalf("expected no validation errors, got %#v", errs)
+	}
+}
+
+func TestValidateResumeTailoringResponseAddRequiresAfter(t *testing.T) {
+	response := validTailoringResponse()
+	response.Changes[0].ChangeType = "add"
+	response.Changes[0].Before = ""
+	response.Changes[0].After = ""
+
+	assertStructuralError(t, ValidateResumeTailoringResponse(response), "changes[0].after")
+}
+
 func validTailoringResponse() ResumeTailoringResponse {
 	return ResumeTailoringResponse{
 		TailoredResume: completeResume(),

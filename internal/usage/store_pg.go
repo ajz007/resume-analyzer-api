@@ -70,17 +70,23 @@ func (s *pgStore) Reset(ctx context.Context, userID string) (Usage, error) {
 		}
 	}()
 	now := time.Now().UTC()
-	resetsAt := now.Add(7 * 24 * time.Hour)
+	resetsAt := nextMonthlyReset(now)
+	plan := defaultPlan(userID)
+	limit := defaultLimit(userID)
 	if _, err = tx.ExecContext(ctx, `
 INSERT INTO usage (user_id, plan, limit_amount, used, resets_at)
-VALUES ($1, 'Starter', 10, 0, $2)
-ON CONFLICT (user_id) DO UPDATE SET used = 0, resets_at = EXCLUDED.resets_at`, userID, resetsAt); err != nil {
+VALUES ($1, $2, $3, 0, $4)
+ON CONFLICT (user_id) DO UPDATE SET
+    plan = EXCLUDED.plan,
+    limit_amount = EXCLUDED.limit_amount,
+    used = 0,
+    resets_at = EXCLUDED.resets_at`, userID, plan, limit, resetsAt); err != nil {
 		return Usage{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return Usage{}, err
 	}
-	return Usage{Plan: "Starter", Limit: 10, Used: 0, ResetsAt: resetsAt}, nil
+	return Usage{Plan: plan, Limit: limit, Used: 0, ResetsAt: resetsAt}, nil
 }
 
 func (s *pgStore) CreateApplyRun(ctx context.Context, run ApplyRun) error {
@@ -227,8 +233,7 @@ SELECT plan, limit_amount, used, resets_at FROM usage WHERE user_id = $1 FOR UPD
 	err := row.Scan(&u.Plan, &u.Limit, &u.Used, &u.ResetsAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			u = defaultUsage()
-			u.ResetsAt = time.Now().UTC().Add(7 * 24 * time.Hour)
+			u = defaultUsage(userID)
 			if _, err = tx.ExecContext(ctx, `
 INSERT INTO usage (user_id, plan, limit_amount, used, resets_at) VALUES ($1, $2, $3, $4, $5)`,
 				userID, u.Plan, u.Limit, u.Used, u.ResetsAt); err != nil {
@@ -240,10 +245,29 @@ INSERT INTO usage (user_id, plan, limit_amount, used, resets_at) VALUES ($1, $2,
 	}
 
 	now := time.Now().UTC()
+	expectedPlan := defaultPlan(userID)
+	expectedLimit := defaultLimit(userID)
+	needsUpdate := false
+	if u.Plan != expectedPlan {
+		u.Plan = expectedPlan
+		needsUpdate = true
+	}
+	if u.Limit != expectedLimit {
+		u.Limit = expectedLimit
+		needsUpdate = true
+	}
 	if now.After(u.ResetsAt) || now.Equal(u.ResetsAt) {
 		u.Used = 0
-		u.ResetsAt = now.Add(7 * 24 * time.Hour)
-		if _, err = tx.ExecContext(ctx, `UPDATE usage SET used = $1, resets_at = $2 WHERE user_id = $3`, u.Used, u.ResetsAt, userID); err != nil {
+		u.ResetsAt = nextMonthlyReset(now)
+		needsUpdate = true
+	} else if needsUpdate {
+		u.ResetsAt = nextMonthlyReset(now)
+	}
+	if needsUpdate {
+		if _, err = tx.ExecContext(ctx, `
+UPDATE usage
+SET plan = $1, limit_amount = $2, used = $3, resets_at = $4
+WHERE user_id = $5`, u.Plan, u.Limit, u.Used, u.ResetsAt, userID); err != nil {
 			return Usage{}, err
 		}
 	}
