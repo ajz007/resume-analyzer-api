@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -22,11 +24,15 @@ import (
 
 type mockGenerationLLM struct {
 	response string
+	err      error
 }
 
 func (m mockGenerationLLM) Complete(ctx context.Context, prompt string) (string, error) {
 	_ = ctx
 	_ = prompt
+	if m.err != nil {
+		return "", m.err
+	}
 	return m.response, nil
 }
 
@@ -113,6 +119,51 @@ func TestResumesCreateRejectsLongTitle(t *testing.T) {
 	}
 }
 
+func TestResumesCreateInvalidBodyReturnsBindDetails(t *testing.T) {
+	router := newTestRouter(t)
+
+	resp := performJSON(t, router, http.MethodPost, "/api/v1/resumes", uuid.NewString(), map[string]any{
+		"title": "Backend Engineer Resume",
+		"resume": map[string]any{
+			"schemaVersion": "resume.v1",
+			"summary":       "",
+		},
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body errorResponseBody
+	decodeJSON(t, resp, &body)
+	if body.Error.Message != "invalid request body" {
+		t.Fatalf("expected invalid request body message, got %#v", body)
+	}
+	if len(body.Error.Details) == 0 || body.Error.Details[0].Field != "resume.summary" {
+		t.Fatalf("expected bind details for resume.summary, got %#v", body.Error.Details)
+	}
+}
+
+func TestResumesUpdateMissingTitleReturnsFieldDetails(t *testing.T) {
+	router := newTestRouter(t)
+	created := createResume(t, router, "google:12345", "Backend Engineer Resume", validResume())
+
+	resp := performJSON(t, router, http.MethodPut, "/api/v1/resumes/"+created.ID, "google:12345", map[string]any{
+		"resume": validResume(),
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body errorResponseBody
+	decodeJSON(t, resp, &body)
+	if body.Error.Message != "invalid resume request" {
+		t.Fatalf("expected invalid resume request message, got %#v", body)
+	}
+	if len(body.Error.Details) == 0 || body.Error.Details[0].Field != "title" {
+		t.Fatalf("expected title validation details, got %#v", body.Error.Details)
+	}
+}
+
 func TestResumesIncompleteDraftCreatesWithWarnings(t *testing.T) {
 	router := newTestRouter(t)
 
@@ -181,6 +232,82 @@ func TestResumesGenerateValidResponseCreatesResume(t *testing.T) {
 	}
 	if versions[0].SourceType != resumespkg.SourceAIGenerated {
 		t.Fatalf("expected source type %q, got %q", resumespkg.SourceAIGenerated, versions[0].SourceType)
+	}
+}
+
+func TestResumesGenerateLogsAndHandlesValidSmallJD(t *testing.T) {
+	app := newTestApp(t)
+	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{
+		Resume: validResume(),
+	})}
+	jobDescription := "Need Go APIs and PostgreSQL."
+
+	resp, logs := performJSONWithLogs(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+		"title":          "Backend Engineer Resume",
+		"targetRole":     "Backend Engineer",
+		"generationMode": resumespkg.GenerationModeFromJobDescription,
+		"jobDescription": jobDescription,
+		"experienceText": "Alex worked at Acme on Go APIs.",
+	})
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	}
+	for _, needle := range []string{
+		`"msg":"resume.generate.request.start"`,
+		`"msg":"resume.generate.request.end"`,
+		`"msg":"resume.generate.llm.start"`,
+		`"msg":"resume.generate.llm.finish"`,
+		`"generation_mode":"from_job_description"`,
+		`"job_description_length":28`,
+	} {
+		if !strings.Contains(logs, needle) {
+			t.Fatalf("expected logs to contain %s, logs=%s", needle, logs)
+		}
+	}
+	if strings.Contains(logs, jobDescription) {
+		t.Fatalf("expected logs not to contain raw job description, logs=%s", logs)
+	}
+}
+
+func TestResumesGenerateOversizedJobDescriptionReturnsValidationError(t *testing.T) {
+	app := newTestApp(t)
+
+	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+		"title":          "Backend Engineer Resume",
+		"generationMode": resumespkg.GenerationModeFromJobDescription,
+		"jobDescription": strings.Repeat("a", 30001),
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body errorResponseBody
+	decodeJSON(t, resp, &body)
+	if body.Error.Code != "validation_error" {
+		t.Fatalf("expected validation_error, got %#v", body.Error)
+	}
+	if len(body.Error.Details) == 0 || body.Error.Details[0].Field != "jobDescription" {
+		t.Fatalf("expected jobDescription validation details, got %#v", body.Error.Details)
+	}
+}
+
+func TestResumesGenerateTimeoutReturnsStructuredError(t *testing.T) {
+	app := newTestApp(t)
+	app.ResumesService.LLM = mockGenerationLLM{err: context.DeadlineExceeded}
+
+	resp, logs := performJSONWithLogs(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
+
+	if resp.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected status 504, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body errorResponseBody
+	decodeJSON(t, resp, &body)
+	if body.Error.Code != "RESUME_GENERATION_TIMEOUT" {
+		t.Fatalf("expected RESUME_GENERATION_TIMEOUT, got %#v", body.Error)
+	}
+	if !strings.Contains(logs, `"msg":"resume.generate.llm.timeout"`) {
+		t.Fatalf("expected timeout log, got %s", logs)
 	}
 }
 
@@ -384,6 +511,11 @@ func TestResumesGenerateInvalidAIResponseIsRejected(t *testing.T) {
 
 	if resp.Code != http.StatusBadGateway {
 		t.Fatalf("expected status 502, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body errorResponseBody
+	decodeJSON(t, resp, &body)
+	if body.Error.Code != "RESUME_GENERATION_INVALID_OUTPUT" {
+		t.Fatalf("expected RESUME_GENERATION_INVALID_OUTPUT, got %#v", body.Error)
 	}
 	listResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes", ownerID, nil)
 	if listResp.Code != http.StatusOK {
@@ -1082,6 +1214,14 @@ type resumeBody struct {
 	ReadinessWarnings []modelv1.ValidationWarning `json:"readinessWarnings"`
 }
 
+type errorResponseBody struct {
+	Error struct {
+		Code    string                    `json:"code"`
+		Message string                    `json:"message"`
+		Details []modelv1.ValidationError `json:"details"`
+	} `json:"error"`
+}
+
 type generateBody struct {
 	ID                string                      `json:"id"`
 	Title             string                      `json:"title"`
@@ -1172,6 +1312,28 @@ func performJSON(t *testing.T, router *gin.Engine, method, path, ownerID string,
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	return resp
+}
+
+func performJSONWithLogs(t *testing.T, router *gin.Engine, method, path, ownerID string, body any) (*httptest.ResponseRecorder, string) {
+	t.Helper()
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = origStdout
+	}()
+
+	resp := performJSON(t, router, method, path, ownerID, body)
+
+	_ = w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read log output: %v", err)
+	}
+	return resp, buf.String()
 }
 
 func performGuestJSON(t *testing.T, router *gin.Engine, method, path, guestID string, body any) *httptest.ResponseRecorder {

@@ -1,22 +1,28 @@
 package resumes
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
 	"resume-backend/internal/shared/server/middleware"
 	"resume-backend/internal/shared/server/respond"
+	"resume-backend/internal/shared/telemetry"
 	modelv1 "resume-backend/resume/modelv1"
 )
 
 type Handler struct {
 	Svc *Service
 }
+
+const maxGenerateResumeRequestBytes int64 = 65536
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{Svc: svc}
@@ -129,7 +135,11 @@ func (h *Handler) create(c *gin.Context) {
 
 	var req saveResumeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid request body", nil)
+		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid request body", bindJSONErrorDetails(err))
+		return
+	}
+	if errs := validateSaveResumeRequest(req); len(errs) > 0 {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid resume request", errs)
 		return
 	}
 
@@ -147,13 +157,47 @@ func (h *Handler) generate(c *gin.Context) {
 		return
 	}
 
+	startedAt := time.Now()
+	requestID := middleware.RequestIDFromContext(c)
 	var req generateResumeRequest
+	var responseCode string
+	defer func() {
+		telemetry.Info("resume.generate.request.end", map[string]any{
+			"request_id":             requestID,
+			"user_id":                ownerID,
+			"method":                 c.Request.Method,
+			"path":                   c.Request.URL.Path,
+			"generation_mode":        strings.TrimSpace(req.GenerationMode),
+			"job_description_length": utf8.RuneCountInString(strings.TrimSpace(req.JobDescription)),
+			"experience_text_length": utf8.RuneCountInString(strings.TrimSpace(req.ExperienceText)),
+			"status":                 c.Writer.Status(),
+			"error_code":             responseCode,
+			"duration_ms":            durationMilliseconds(time.Since(startedAt)),
+		})
+	}()
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxGenerateResumeRequestBytes)
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid request body", nil)
+		responseCode = "validation_error"
+		respond.Error(c, http.StatusBadRequest, responseCode, "invalid request body", bindJSONErrorDetails(err))
+		return
+	}
+	telemetry.Info("resume.generate.request.start", map[string]any{
+		"request_id":             requestID,
+		"user_id":                ownerID,
+		"method":                 c.Request.Method,
+		"path":                   c.Request.URL.Path,
+		"generation_mode":        strings.TrimSpace(req.GenerationMode),
+		"job_description_length": utf8.RuneCountInString(strings.TrimSpace(req.JobDescription)),
+		"experience_text_length": utf8.RuneCountInString(strings.TrimSpace(req.ExperienceText)),
+	})
+	if errs := validateGenerateResumeRequest(req); len(errs) > 0 {
+		responseCode = "validation_error"
+		respond.Error(c, http.StatusBadRequest, responseCode, "invalid resume request", errs)
 		return
 	}
 
-	result, err := h.Svc.Generate(c.Request.Context(), ownerID, GenerateRequest{
+	result, err := h.Svc.Generate(withRequestLogContext(c.Request.Context(), requestID, ownerID), ownerID, GenerateRequest{
 		Title:                  req.Title,
 		TargetRole:             req.TargetRole,
 		Seniority:              req.Seniority,
@@ -165,6 +209,7 @@ func (h *Handler) generate(c *gin.Context) {
 		AdditionalInstructions: req.AdditionalInstructions,
 	})
 	if err != nil {
+		_, responseCode, _, _ = classifyServiceError(err)
 		h.respondServiceError(c, err)
 		return
 	}
@@ -180,7 +225,11 @@ func (h *Handler) update(c *gin.Context) {
 	resumeID := strings.TrimSpace(c.Param("resumeId"))
 	var req saveResumeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid request body", nil)
+		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid request body", bindJSONErrorDetails(err))
+		return
+	}
+	if errs := validateSaveResumeRequest(req); len(errs) > 0 {
+		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid resume request", errs)
 		return
 	}
 
@@ -308,21 +357,8 @@ func (h *Handler) exportDOCX(c *gin.Context) {
 }
 
 func (h *Handler) respondServiceError(c *gin.Context, err error) {
-	var validationErr ValidationError
-	switch {
-	case errors.As(err, &validationErr):
-		respond.Error(c, http.StatusBadRequest, "validation_error", "resume validation failed", validationErr.Errors)
-	case errors.Is(err, ErrInvalidInput):
-		respond.Error(c, http.StatusBadRequest, "validation_error", "invalid resume request", nil)
-	case errors.Is(err, ErrInvalidLLMOutput):
-		respond.Error(c, http.StatusBadGateway, "invalid_llm_output", "invalid model output", nil)
-	case errors.Is(err, ErrNotFound):
-		respond.Error(c, http.StatusNotFound, "not_found", "resume not found", nil)
-	case errors.Is(err, ErrForbidden):
-		respond.Error(c, http.StatusForbidden, "forbidden", "not allowed", nil)
-	default:
-		respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to process resume", err)
-	}
+	status, code, message, details := classifyServiceError(err)
+	respond.Error(c, status, code, message, details)
 }
 
 func authenticatedOwnerID(c *gin.Context) (string, bool) {
@@ -467,4 +503,127 @@ func toVersionResponse(version ResumeVersion) versionResponse {
 		ParentVersionID: version.ParentVersionID,
 		CreatedAt:       version.CreatedAt,
 	}
+}
+
+func validateSaveResumeRequest(req saveResumeRequest) []modelv1.ValidationError {
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		return []modelv1.ValidationError{{
+			Field:   "title",
+			Message: "title is required",
+		}}
+	}
+	return nil
+}
+
+func validateGenerateResumeRequest(req generateResumeRequest) []modelv1.ValidationError {
+	normalized := normalizeGenerateRequest(GenerateRequest{
+		Title:                  req.Title,
+		TargetRole:             req.TargetRole,
+		Seniority:              req.Seniority,
+		GenerationMode:         req.GenerationMode,
+		JobDescription:         req.JobDescription,
+		ExperienceText:         req.ExperienceText,
+		SkillsText:             req.SkillsText,
+		EducationText:          req.EducationText,
+		AdditionalInstructions: req.AdditionalInstructions,
+	})
+
+	var errs []modelv1.ValidationError
+	if normalized.Title == "" {
+		errs = append(errs, modelv1.ValidationError{Field: "title", Message: "title is required"})
+	}
+	if utf8.RuneCountInString(normalized.Title) > maxTitleLength {
+		errs = append(errs, modelv1.ValidationError{Field: "title", Message: "title must be at most 160 characters"})
+	}
+	if !validGenerationMode(normalized.GenerationMode) {
+		errs = append(errs, modelv1.ValidationError{Field: "generationMode", Message: "generationMode is invalid"})
+	}
+	if normalized.GenerationMode == GenerationModeFromJobDescription && normalized.JobDescription == "" {
+		errs = append(errs, modelv1.ValidationError{Field: "jobDescription", Message: "jobDescription is required for from_job_description mode"})
+	}
+	if normalized.GenerationMode == GenerationModeFromNotes &&
+		normalized.ExperienceText == "" &&
+		normalized.SkillsText == "" &&
+		normalized.EducationText == "" &&
+		normalized.AdditionalInstructions == "" {
+		errs = append(errs, modelv1.ValidationError{Field: "experienceText", Message: "at least one notes field is required for from_notes mode"})
+	}
+	if utf8.RuneCountInString(normalized.JobDescription) > maxJobDescriptionLength {
+		errs = append(errs, modelv1.ValidationError{Field: "jobDescription", Message: "jobDescription must be at most 30000 characters"})
+	}
+	if utf8.RuneCountInString(normalized.ExperienceText) > maxGenerationTextLength {
+		errs = append(errs, modelv1.ValidationError{Field: "experienceText", Message: "experienceText must be at most 20000 characters"})
+	}
+	if utf8.RuneCountInString(normalized.SkillsText) > maxGenerationTextLength {
+		errs = append(errs, modelv1.ValidationError{Field: "skillsText", Message: "skillsText must be at most 20000 characters"})
+	}
+	if utf8.RuneCountInString(normalized.EducationText) > maxGenerationTextLength {
+		errs = append(errs, modelv1.ValidationError{Field: "educationText", Message: "educationText must be at most 20000 characters"})
+	}
+	if utf8.RuneCountInString(normalized.AdditionalInstructions) > maxAdditionalInstructionsLength {
+		errs = append(errs, modelv1.ValidationError{Field: "additionalInstructions", Message: "additionalInstructions must be at most 4000 characters"})
+	}
+	return errs
+}
+
+func classifyServiceError(err error) (status int, code, message string, details any) {
+	var validationErr ValidationError
+	switch {
+	case errors.As(err, &validationErr):
+		return http.StatusBadRequest, "validation_error", "resume validation failed", validationErr.Errors
+	case errors.Is(err, ErrInvalidInput):
+		return http.StatusBadRequest, "validation_error", "invalid resume request", nil
+	case errors.Is(err, ErrGenerationTimeout):
+		return http.StatusGatewayTimeout, "RESUME_GENERATION_TIMEOUT", "resume generation timed out", nil
+	case errors.Is(err, ErrInvalidLLMOutput):
+		return http.StatusBadGateway, "RESUME_GENERATION_INVALID_OUTPUT", "invalid model output", nil
+	case errors.Is(err, ErrNotFound):
+		return http.StatusNotFound, "not_found", "resume not found", nil
+	case errors.Is(err, ErrForbidden):
+		return http.StatusForbidden, "forbidden", "not allowed", nil
+	default:
+		return http.StatusInternalServerError, "internal_error", "failed to process resume", err
+	}
+}
+
+func bindJSONErrorDetails(err error) []modelv1.ValidationError {
+	var typeErr *json.UnmarshalTypeError
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &typeErr) {
+		field := strings.TrimSpace(typeErr.Field)
+		if field == "" {
+			field = "body"
+		}
+		return []modelv1.ValidationError{{
+			Field:   lowerFirst(field),
+			Message: "has an invalid type",
+		}}
+	}
+	if errors.As(err, &maxBytesErr) {
+		return []modelv1.ValidationError{{
+			Field:   "body",
+			Message: "request body exceeds 65536 bytes",
+		}}
+	}
+	if errors.Is(err, io.EOF) {
+		return []modelv1.ValidationError{{
+			Field:   "body",
+			Message: "request body is required",
+		}}
+	}
+	return []modelv1.ValidationError{{
+		Field:   "body",
+		Message: strings.TrimSpace(err.Error()),
+	}}
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	first := strings.ToLower(string(runes[0]))
+	runes[0] = []rune(first)[0]
+	return string(runes)
 }
