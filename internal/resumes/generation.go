@@ -8,15 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"resume-backend/internal/shared/telemetry"
 	modelv1 "resume-backend/resume/modelv1"
 )
 
 const (
 	maxGenerationTextLength          = 20000
+	maxAdditionalInstructionsLength  = 4000
 	GenerationModeFromNotes          = "from_notes"
 	GenerationModeFromJobDescription = "from_job_description"
 	GenerationModeBlank              = "blank"
@@ -70,12 +74,33 @@ func (s *Service) Generate(ctx context.Context, ownerID string, req GenerateRequ
 		return GenerateResult{}, errors.New("llm prompt client not configured")
 	}
 
+	llmStart := time.Now()
+	telemetry.Info("resume.generate.llm.start", generationLogFields(ctx, req, map[string]any{
+		"duration_ms": 0.0,
+	}))
+	// TODO: Move resume generation to the existing async job queue pattern when request latency and timeout pressure justify it.
 	raw, err := s.LLM.Complete(ctx, buildGenerationPrompt(req))
 	if err != nil {
+		fields := generationLogFields(ctx, req, map[string]any{
+			"duration_ms": durationMilliseconds(time.Since(llmStart)),
+		})
+		if isGenerationTimeoutError(err) {
+			telemetry.Error("resume.generate.llm.timeout", fields)
+			return GenerateResult{}, ErrGenerationTimeout
+		}
+		fields["error"] = err.Error()
+		telemetry.Error("resume.generate.llm.error", fields)
 		return GenerateResult{}, err
 	}
+	telemetry.Info("resume.generate.llm.finish", generationLogFields(ctx, req, map[string]any{
+		"duration_ms": durationMilliseconds(time.Since(llmStart)),
+	}))
 	var response modelv1.ResumeGenerationResponse
 	if err := decodeGenerationResponse(raw, &response); err != nil {
+		telemetry.Error("resume.generate.llm.invalid_output", generationLogFields(ctx, req, map[string]any{
+			"duration_ms": durationMilliseconds(time.Since(llmStart)),
+			"reason":      "decode_generation_response_failed",
+		}))
 		return GenerateResult{}, ErrInvalidLLMOutput
 	}
 	sanitizeGeneratedResume(&response.Resume, req)
@@ -83,6 +108,11 @@ func (s *Service) Generate(ctx context.Context, ownerID string, req GenerateRequ
 	normalizeGenerationModeResponse(&response, req)
 
 	if errs := modelv1.ValidateResumeGenerationResponse(response); len(errs) > 0 {
+		telemetry.Error("resume.generate.llm.invalid_output", generationLogFields(ctx, req, map[string]any{
+			"duration_ms": durationMilliseconds(time.Since(llmStart)),
+			"reason":      "resume_generation_response_validation_failed",
+			"issue_count": len(errs),
+		}))
 		return GenerateResult{}, ErrInvalidLLMOutput
 	}
 	if errs := validateGenerationSafety(response, req); len(errs) > 0 {
@@ -125,7 +155,7 @@ func generationTextTooLong(req GenerateRequest) bool {
 	return utf8.RuneCountInString(req.ExperienceText) > maxGenerationTextLength ||
 		utf8.RuneCountInString(req.SkillsText) > maxGenerationTextLength ||
 		utf8.RuneCountInString(req.EducationText) > maxGenerationTextLength ||
-		utf8.RuneCountInString(req.AdditionalInstructions) > 4000
+		utf8.RuneCountInString(req.AdditionalInstructions) > maxAdditionalInstructionsLength
 }
 
 func validGenerationMode(mode string) bool {
@@ -542,4 +572,37 @@ func cleanIDPrefix(prefix string) string {
 		return "item"
 	}
 	return out
+}
+
+func generationLogFields(ctx context.Context, req GenerateRequest, extra map[string]any) map[string]any {
+	fields := map[string]any{
+		"request_id":             requestIDFromContext(ctx),
+		"user_id":                requestUserIDFromContext(ctx),
+		"generation_mode":        req.GenerationMode,
+		"job_description_length": utf8.RuneCountInString(req.JobDescription),
+		"experience_text_length": utf8.RuneCountInString(req.ExperienceText),
+	}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	return fields
+}
+
+func durationMilliseconds(d time.Duration) float64 {
+	return float64(d.Microseconds()) / 1000.0
+}
+
+func isGenerationTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded")
 }

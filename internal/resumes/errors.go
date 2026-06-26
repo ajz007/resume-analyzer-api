@@ -7,10 +7,11 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("not found")
-	ErrInvalidInput     = errors.New("invalid input")
-	ErrForbidden        = errors.New("forbidden")
-	ErrInvalidLLMOutput = errors.New("invalid llm output")
+	ErrNotFound          = errors.New("not found")
+	ErrInvalidInput      = errors.New("invalid input")
+	ErrForbidden         = errors.New("forbidden")
+	ErrInvalidLLMOutput  = errors.New("invalid llm output")
+	ErrGenerationTimeout = errors.New("resume generation timeout")
 )
 
 type ValidationError struct {
