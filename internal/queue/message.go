@@ -2,9 +2,16 @@ package queue
 
 import "encoding/json"
 
+const (
+	MessageTypeAnalysis         = "analysis"
+	MessageTypeResumeGeneration = "resume_generation"
+)
+
 // Message is the payload sent to downstream queue consumers.
 type Message struct {
+	Type       string `json:"type,omitempty"`
 	AnalysisID string `json:"analysisId"`
+	JobID      string `json:"jobId,omitempty"`
 	RequestID  string `json:"requestId"`
 	EnqueuedAt string `json:"enqueuedAt"`
 	Version    int    `json:"version"`

@@ -100,8 +100,9 @@ func (r *PGRepo) Update(ctx context.Context, ownerID, resumeID, title string, ve
 	defer tx.Rollback()
 
 	const selectResume = `
-SELECT id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
-FROM resumes
+SELECT r.id, r.owner_id, r.title, r.status, r.source_resume_id, r.source_version_id, r.origin_type, r.current_version_id, r.current_resume_json, v.change_summary, r.created_at, r.updated_at
+FROM resumes r
+LEFT JOIN resume_versions v ON v.id = r.current_version_id
 WHERE id = $1
 FOR UPDATE`
 	current, err := scanResume(tx.QueryRowContext(ctx, selectResume, resumeID))
@@ -178,8 +179,9 @@ WHERE id = $5`
 
 func (r *PGRepo) GetByID(ctx context.Context, ownerID, resumeID string) (Resume, error) {
 	const query = `
-SELECT id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
-FROM resumes
+SELECT r.id, r.owner_id, r.title, r.status, r.source_resume_id, r.source_version_id, r.origin_type, r.current_version_id, r.current_resume_json, v.change_summary, r.created_at, r.updated_at
+FROM resumes r
+LEFT JOIN resume_versions v ON v.id = r.current_version_id
 WHERE id = $1
 LIMIT 1`
 	resume, err := scanResume(r.DB.QueryRowContext(ctx, query, resumeID))
@@ -195,10 +197,11 @@ LIMIT 1`
 func (r *PGRepo) ListByOwner(ctx context.Context, ownerID string, limit, offset int) ([]Resume, error) {
 	limit, offset = normalizeLimitOffset(limit, offset)
 	const query = `
-SELECT id, owner_id, title, status, source_resume_id, source_version_id, origin_type, current_version_id, current_resume_json, created_at, updated_at
-FROM resumes
-WHERE owner_id = $1
-ORDER BY updated_at DESC
+SELECT r.id, r.owner_id, r.title, r.status, r.source_resume_id, r.source_version_id, r.origin_type, r.current_version_id, r.current_resume_json, v.change_summary, r.created_at, r.updated_at
+FROM resumes r
+LEFT JOIN resume_versions v ON v.id = r.current_version_id
+WHERE r.owner_id = $1
+ORDER BY r.updated_at DESC
 LIMIT $2 OFFSET $3`
 	rows, err := r.DB.QueryContext(ctx, query, ownerID, limit, offset)
 	if err != nil {
@@ -270,6 +273,7 @@ func scanResume(row rowScanner) (Resume, error) {
 	var sourceVersionID sql.NullString
 	var originType sql.NullString
 	var raw []byte
+	var changeRaw []byte
 	err := row.Scan(
 		&resume.ID,
 		&resume.OwnerID,
@@ -280,6 +284,7 @@ func scanResume(row rowScanner) (Resume, error) {
 		&originType,
 		&versionID,
 		&raw,
+		&changeRaw,
 		&resume.CreatedAt,
 		&resume.UpdatedAt,
 	)
@@ -303,6 +308,11 @@ func scanResume(row rowScanner) (Resume, error) {
 	}
 	if err := json.Unmarshal(raw, &resume.CurrentResume); err != nil {
 		return Resume{}, err
+	}
+	if len(changeRaw) > 0 {
+		if err := json.Unmarshal(changeRaw, &resume.CurrentChangeSummary); err != nil {
+			return Resume{}, err
+		}
 	}
 	return resume, nil
 }

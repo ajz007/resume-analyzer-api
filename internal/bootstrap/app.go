@@ -41,42 +41,47 @@ const (
 
 // App holds shared dependencies. Router is intentionally left nil for now.
 type App struct {
-	Config                  config.Config
-	Router                  *gin.Engine
-	DB                      *sql.DB
-	Store                   object.ObjectStore
-	Queue                   queue.Client
-	UploadsPresign          *s3.PresignClient
-	UploadsBucket           string
-	UploadsPrefix           string
-	DocumentsRepo           documents.DocumentsRepo
-	AnalysesRepo            analyses.Repo
-	GeneratedResumesRepo    generatedresumes.Repo
-	ResumesRepo             resumes.Repo
-	UsersRepo               users.Repo
-	DocumentsService        *documents.Service
-	UsageService            *usage.Service
-	AnalysesService         *analyses.Service
-	AnalysisProcessor       AnalysisProcessor
-	GeneratedResumesService *generatedresumes.Service
-	ResumesService          *resumes.Service
-	ApplyService            *applies.Service
-	AccountService          *account.Service
-	UsersService            *users.Service
-	DocumentsHandler        *documents.Handler
-	AnalysisHandler         *analyses.Handler
-	ApplyHandler            *applies.Handler
-	AccountHandler          *account.Handler
-	UsageHandler            *usage.Handler
-	ResumesHandler          *resumes.Handler
-	UsersHandler            *users.Handler
-	GoogleAuth              *googleauth.GoogleService
-	Services                map[string]any
+	Config                    config.Config
+	Router                    *gin.Engine
+	DB                        *sql.DB
+	Store                     object.ObjectStore
+	Queue                     queue.Client
+	UploadsPresign            *s3.PresignClient
+	UploadsBucket             string
+	UploadsPrefix             string
+	DocumentsRepo             documents.DocumentsRepo
+	AnalysesRepo              analyses.Repo
+	GeneratedResumesRepo      generatedresumes.Repo
+	ResumesRepo               resumes.Repo
+	UsersRepo                 users.Repo
+	DocumentsService          *documents.Service
+	UsageService              *usage.Service
+	AnalysesService           *analyses.Service
+	AnalysisProcessor         AnalysisProcessor
+	ResumeGenerationProcessor ResumeGenerationProcessor
+	GeneratedResumesService   *generatedresumes.Service
+	ResumesService            *resumes.Service
+	ApplyService              *applies.Service
+	AccountService            *account.Service
+	UsersService              *users.Service
+	DocumentsHandler          *documents.Handler
+	AnalysisHandler           *analyses.Handler
+	ApplyHandler              *applies.Handler
+	AccountHandler            *account.Handler
+	UsageHandler              *usage.Handler
+	ResumesHandler            *resumes.Handler
+	UsersHandler              *users.Handler
+	GoogleAuth                *googleauth.GoogleService
+	Services                  map[string]any
 }
 
 // AnalysisProcessor allows callers to override analysis processing for tests.
 type AnalysisProcessor interface {
 	ProcessAnalysis(ctx context.Context, analysisID string) error
+}
+
+type ResumeGenerationProcessor interface {
+	ProcessResumeGenerationJob(ctx context.Context, generationID string) error
 }
 
 // Build prepares shared dependencies without wiring routes.
@@ -231,6 +236,7 @@ func buildServices(app *App) error {
 	var analysisRepo analyses.Repo
 	var generatedResumeRepo generatedresumes.Repo
 	var resumeRepo resumes.Repo
+	var resumeGenerationJobRepo resumes.GenerationJobRepo
 	var userRepo users.Repo
 
 	if app.DB != nil {
@@ -238,12 +244,14 @@ func buildServices(app *App) error {
 		analysisRepo = &analyses.PGRepo{DB: app.DB}
 		generatedResumeRepo = &generatedresumes.PGRepo{DB: app.DB}
 		resumeRepo = &resumes.PGRepo{DB: app.DB}
+		resumeGenerationJobRepo = &resumes.GenerationJobPGRepo{DB: app.DB}
 		userRepo = &users.PGRepo{DB: app.DB}
 	} else {
 		docRepo = documents.NewMemoryRepo()
 		analysisRepo = analyses.NewMemoryRepo()
 		generatedResumeRepo = generatedresumes.NewMemoryRepo()
 		resumeRepo = resumes.NewMemoryRepo()
+		resumeGenerationJobRepo = resumes.NewGenerationJobMemoryRepo()
 		userRepo = users.NewMemoryRepo()
 	}
 
@@ -306,8 +314,10 @@ func buildServices(app *App) error {
 		Store:        app.Store,
 	}
 	resumeSvc := &resumes.Service{
-		Repo: resumeRepo,
-		LLM:  applyLLMClient,
+		Repo:     resumeRepo,
+		JobRepo:  resumeGenerationJobRepo,
+		LLM:      applyLLMClient,
+		JobQueue: app.Queue,
 	}
 
 	usageHandler := usage.NewHandler(usageSvc, analysisAdapter, docRepo, app.Store, generatedResumeSvc)
@@ -337,6 +347,7 @@ func buildServices(app *App) error {
 	app.UsageService = usageSvc
 	app.AnalysesService = analysisSvc
 	app.AnalysisProcessor = analysisSvc
+	app.ResumeGenerationProcessor = resumeSvc
 	app.GeneratedResumesService = generatedResumeSvc
 	app.ResumesService = resumeSvc
 	app.ApplyService = applySvc

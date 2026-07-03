@@ -36,7 +36,14 @@ func (r *MemoryRepo) Create(ctx context.Context, resume Resume, version ResumeVe
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, exists := r.byID[resume.ID]; exists {
+		return Resume{}, ErrAlreadyExists
+	}
+	if _, exists := r.versionsByID[version.ID]; exists {
+		return Resume{}, ErrAlreadyExists
+	}
 
+	resume.CurrentChangeSummary = version.ChangeSummary
 	r.byID[resume.ID] = resume
 	r.byOwner[resume.OwnerID] = append(r.byOwner[resume.OwnerID], resume.ID)
 	r.versionsByID[version.ID] = version
@@ -75,6 +82,7 @@ func (r *MemoryRepo) Update(ctx context.Context, ownerID, resumeID, title string
 	resume.Title = title
 	resume.CurrentResume = version.Resume
 	resume.CurrentVersionID = version.ID
+	resume.CurrentChangeSummary = version.ChangeSummary
 	resume.UpdatedAt = version.CreatedAt
 
 	r.byID[resumeID] = resume

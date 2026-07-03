@@ -31,6 +31,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/resumes", h.create)
 	rg.POST("/resumes/generate", h.generate)
+	rg.GET("/resume-generations/:generationId", h.getGeneration)
 	rg.GET("/resumes", h.list)
 	rg.GET("/resumes/:resumeId", h.get)
 	rg.PUT("/resumes/:resumeId", h.update)
@@ -68,6 +69,9 @@ type generateResumeResponse struct {
 	ID                string                      `json:"id"`
 	Title             string                      `json:"title"`
 	Status            string                      `json:"status"`
+	DraftType         string                      `json:"draftType,omitempty"`
+	GenerationMode    string                      `json:"generationMode,omitempty"`
+	SampleTemplate    bool                        `json:"sampleTemplate,omitempty"`
 	CurrentVersionID  string                      `json:"currentVersionId"`
 	Resume            modelv1.ResumeModel         `json:"resume"`
 	RequiresUserInput []modelv1.RequiresUserInput `json:"requiresUserInput"`
@@ -79,25 +83,29 @@ type generateResumeResponse struct {
 }
 
 type tailorResumeResponse struct {
-	SourceResumeID      string                       `json:"sourceResumeId"`
-	SourceVersionID     string                       `json:"sourceVersionId"`
-	ID                  string                       `json:"id"`
-	Title               string                       `json:"title"`
-	Status              string                       `json:"status"`
-	CurrentVersionID    string                       `json:"currentVersionId"`
-	Resume              modelv1.ResumeModel          `json:"resume"`
-	Changes             []modelv1.TailoringChange    `json:"changes"`
-	MissingRequirements []modelv1.MissingRequirement `json:"missingRequirements"`
-	Warnings            []modelv1.ResponseWarning    `json:"warnings"`
-	ReadinessWarnings   []modelv1.ValidationWarning  `json:"readinessWarnings"`
-	CreatedAt           time.Time                    `json:"createdAt"`
-	UpdatedAt           time.Time                    `json:"updatedAt"`
+	SourceResumeID      string                        `json:"sourceResumeId"`
+	SourceVersionID     string                        `json:"sourceVersionId"`
+	ID                  string                        `json:"id"`
+	Title               string                        `json:"title"`
+	Status              string                        `json:"status"`
+	CurrentVersionID    string                        `json:"currentVersionId"`
+	Resume              modelv1.ResumeModel           `json:"resume"`
+	Changes             []modelv1.TailoringChange     `json:"changes"`
+	MissingRequirements []modelv1.MissingRequirement  `json:"missingRequirements"`
+	Suggestions         []modelv1.TailoringSuggestion `json:"suggestions"`
+	Warnings            []modelv1.ResponseWarning     `json:"warnings"`
+	ReadinessWarnings   []modelv1.ValidationWarning   `json:"readinessWarnings"`
+	CreatedAt           time.Time                     `json:"createdAt"`
+	UpdatedAt           time.Time                     `json:"updatedAt"`
 }
 
 type resumeResponse struct {
 	ID                string                      `json:"id"`
 	Title             string                      `json:"title"`
 	Status            string                      `json:"status"`
+	DraftType         string                      `json:"draftType,omitempty"`
+	GenerationMode    string                      `json:"generationMode,omitempty"`
+	SampleTemplate    bool                        `json:"sampleTemplate,omitempty"`
 	CurrentVersionID  string                      `json:"currentVersionId"`
 	Resume            modelv1.ResumeModel         `json:"resume"`
 	ReadinessWarnings []modelv1.ValidationWarning `json:"readinessWarnings"`
@@ -110,6 +118,9 @@ type resumeListItemResponse struct {
 	Title          string    `json:"title"`
 	Status         string    `json:"status"`
 	OriginType     string    `json:"originType"`
+	DraftType      string    `json:"draftType,omitempty"`
+	GenerationMode string    `json:"generationMode,omitempty"`
+	SampleTemplate bool      `json:"sampleTemplate,omitempty"`
 	SourceResumeID string    `json:"sourceResumeId,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
@@ -125,6 +136,11 @@ type versionResponse struct {
 	ChangeSummary   map[string]any      `json:"changeSummary,omitempty"`
 	ParentVersionID *string             `json:"parentVersionId,omitempty"`
 	CreatedAt       time.Time           `json:"createdAt"`
+}
+
+type generationAcceptedResponse struct {
+	GenerationID string `json:"generationId"`
+	Status       string `json:"status"`
 }
 
 func (h *Handler) create(c *gin.Context) {
@@ -197,7 +213,7 @@ func (h *Handler) generate(c *gin.Context) {
 		return
 	}
 
-	result, err := h.Svc.Generate(withRequestLogContext(c.Request.Context(), requestID, ownerID), ownerID, GenerateRequest{
+	job, err := h.Svc.EnqueueGeneration(withRequestLogContext(c.Request.Context(), requestID, ownerID), ownerID, GenerateRequest{
 		Title:                  req.Title,
 		TargetRole:             req.TargetRole,
 		Seniority:              req.Seniority,
@@ -213,7 +229,10 @@ func (h *Handler) generate(c *gin.Context) {
 		h.respondServiceError(c, err)
 		return
 	}
-	respond.JSON(c, http.StatusCreated, toGenerateResumeResponse(result))
+	respond.JSON(c, http.StatusAccepted, generationAcceptedResponse{
+		GenerationID: job.ID,
+		Status:       job.Status,
+	})
 }
 
 func (h *Handler) update(c *gin.Context) {
@@ -281,6 +300,69 @@ func (h *Handler) get(c *gin.Context) {
 		Resume:            resume,
 		ReadinessWarnings: modelv1.ValidateReadiness(resume.CurrentResume),
 	}))
+}
+
+func (h *Handler) getGeneration(c *gin.Context) {
+	ownerID, ok := authenticatedOwnerID(c)
+	if !ok {
+		return
+	}
+
+	job, err := h.Svc.GetGenerationJob(c.Request.Context(), ownerID, strings.TrimSpace(c.Param("generationId")))
+	if err != nil {
+		h.respondServiceError(c, err)
+		return
+	}
+
+	response := gin.H{
+		"generationId": job.ID,
+		"status":       job.Status,
+		"createdAt":    job.CreatedAt,
+		"startedAt":    job.StartedAt,
+		"completedAt":  job.CompletedAt,
+	}
+
+	switch job.Status {
+	case GenerationJobStatusCompleted:
+		if job.ResumeID == nil {
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to load generated resume", nil)
+			return
+		}
+		resume, err := h.Svc.Get(c.Request.Context(), ownerID, *job.ResumeID)
+		if err != nil {
+			h.respondServiceError(c, err)
+			return
+		}
+		result := SaveResult{
+			Resume:            resume,
+			ReadinessWarnings: modelv1.ValidateReadiness(resume.CurrentResume),
+		}
+		response["resumeId"] = resume.ID
+		response["currentVersionId"] = resume.CurrentVersionID
+		response["resume"] = resume.CurrentResume
+		response["readinessWarnings"] = toResumeResponse(result).ReadinessWarnings
+		if job.Result != nil {
+			response["requiresUserInput"] = emptyRequiresUserInput(job.Result.RequiresUserInput)
+			response["assumptions"] = emptyAssumptions(job.Result.Assumptions)
+			response["warnings"] = emptyResponseWarnings(job.Result.Warnings)
+			response["generationMode"] = job.Result.GenerationMode
+			response["fallbackUsed"] = job.Result.FallbackUsed
+			response["fallbackReason"] = job.Result.FallbackReason
+			response["draftType"] = job.Result.DraftType
+		} else {
+			response["requiresUserInput"] = []modelv1.RequiresUserInput{}
+			response["assumptions"] = []modelv1.Assumption{}
+			response["warnings"] = []modelv1.ResponseWarning{}
+			response["generationMode"] = ""
+			response["fallbackUsed"] = false
+			response["fallbackReason"] = ""
+			response["draftType"] = ""
+		}
+	case GenerationJobStatusFailed:
+		response["errorMessage"] = generationFailedMessage
+	}
+
+	respond.JSON(c, http.StatusOK, response)
 }
 
 func (h *Handler) list(c *gin.Context) {
@@ -422,6 +504,9 @@ func toGenerateResumeResponse(result GenerateResult) generateResumeResponse {
 		ID:                result.SavedResume.ID,
 		Title:             result.SavedResume.Title,
 		Status:            result.SavedResume.Status,
+		DraftType:         resumeDraftType(result.SavedResume),
+		GenerationMode:    resumeGenerationMode(result.SavedResume),
+		SampleTemplate:    resumeSampleTemplate(result.SavedResume),
 		CurrentVersionID:  result.SavedResume.CurrentVersionID,
 		Resume:            result.SavedResume.CurrentResume,
 		RequiresUserInput: result.RequiresUserInput,
@@ -440,6 +525,9 @@ func toTailorResumeResponse(result TailorResult) tailorResumeResponse {
 	if result.MissingRequirements == nil {
 		result.MissingRequirements = []modelv1.MissingRequirement{}
 	}
+	if result.Suggestions == nil {
+		result.Suggestions = []modelv1.TailoringSuggestion{}
+	}
 	if result.Warnings == nil {
 		result.Warnings = []modelv1.ResponseWarning{}
 	}
@@ -456,6 +544,7 @@ func toTailorResumeResponse(result TailorResult) tailorResumeResponse {
 		Resume:              result.Resume.CurrentResume,
 		Changes:             result.Changes,
 		MissingRequirements: result.MissingRequirements,
+		Suggestions:         result.Suggestions,
 		Warnings:            result.Warnings,
 		ReadinessWarnings:   result.ReadinessWarnings,
 		CreatedAt:           result.Resume.CreatedAt,
@@ -471,6 +560,9 @@ func toResumeResponse(result SaveResult) resumeResponse {
 		ID:                result.Resume.ID,
 		Title:             result.Resume.Title,
 		Status:            result.Resume.Status,
+		DraftType:         resumeDraftType(result.Resume),
+		GenerationMode:    resumeGenerationMode(result.Resume),
+		SampleTemplate:    resumeSampleTemplate(result.Resume),
 		CurrentVersionID:  result.Resume.CurrentVersionID,
 		Resume:            result.Resume.CurrentResume,
 		ReadinessWarnings: result.ReadinessWarnings,
@@ -485,10 +577,62 @@ func toResumeListItemResponse(resume Resume) resumeListItemResponse {
 		Title:          resume.Title,
 		Status:         resume.Status,
 		OriginType:     resume.OriginType,
+		DraftType:      resumeDraftType(resume),
+		GenerationMode: resumeGenerationMode(resume),
+		SampleTemplate: resumeSampleTemplate(resume),
 		SourceResumeID: resume.SourceResumeID,
 		CreatedAt:      resume.CreatedAt,
 		UpdatedAt:      resume.UpdatedAt,
 	}
+}
+
+func resumeDraftType(resume Resume) string {
+	if value, ok := stringSummaryValue(resume.CurrentChangeSummary, "draftType"); ok {
+		return value
+	}
+	return ""
+}
+
+func resumeGenerationMode(resume Resume) string {
+	if value, ok := stringSummaryValue(resume.CurrentChangeSummary, "generationMode"); ok {
+		return value
+	}
+	return ""
+}
+
+func resumeSampleTemplate(resume Resume) bool {
+	if value, ok := boolSummaryValue(resume.CurrentChangeSummary, "sampleTemplate"); ok {
+		return value
+	}
+	return false
+}
+
+func stringSummaryValue(summary map[string]any, key string) (string, bool) {
+	if summary == nil {
+		return "", false
+	}
+	raw, ok := summary[key]
+	if !ok {
+		return "", false
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	return value, value != ""
+}
+
+func boolSummaryValue(summary map[string]any, key string) (bool, bool) {
+	if summary == nil {
+		return false, false
+	}
+	raw, ok := summary[key]
+	if !ok {
+		return false, false
+	}
+	value, ok := raw.(bool)
+	return value, ok
 }
 
 func toVersionResponse(version ResumeVersion) versionResponse {
@@ -503,6 +647,27 @@ func toVersionResponse(version ResumeVersion) versionResponse {
 		ParentVersionID: version.ParentVersionID,
 		CreatedAt:       version.CreatedAt,
 	}
+}
+
+func emptyRequiresUserInput(items []modelv1.RequiresUserInput) []modelv1.RequiresUserInput {
+	if items == nil {
+		return []modelv1.RequiresUserInput{}
+	}
+	return items
+}
+
+func emptyAssumptions(items []modelv1.Assumption) []modelv1.Assumption {
+	if items == nil {
+		return []modelv1.Assumption{}
+	}
+	return items
+}
+
+func emptyResponseWarnings(items []modelv1.ResponseWarning) []modelv1.ResponseWarning {
+	if items == nil {
+		return []modelv1.ResponseWarning{}
+	}
+	return items
 }
 
 func validateSaveResumeRequest(req saveResumeRequest) []modelv1.ValidationError {
@@ -539,15 +704,14 @@ func validateGenerateResumeRequest(req generateResumeRequest) []modelv1.Validati
 	if !validGenerationMode(normalized.GenerationMode) {
 		errs = append(errs, modelv1.ValidationError{Field: "generationMode", Message: "generationMode is invalid"})
 	}
-	if normalized.GenerationMode == GenerationModeFromJobDescription && normalized.JobDescription == "" {
-		errs = append(errs, modelv1.ValidationError{Field: "jobDescription", Message: "jobDescription is required for from_job_description mode"})
+	if normalized.GenerationMode == GenerationModeSampleFromJobDescription && normalized.JobDescription == "" {
+		errs = append(errs, modelv1.ValidationError{Field: "jobDescription", Message: "jobDescription is required for sample_from_job_description mode"})
 	}
-	if normalized.GenerationMode == GenerationModeFromNotes &&
+	if normalized.GenerationMode == GenerationModeFromExperience &&
 		normalized.ExperienceText == "" &&
 		normalized.SkillsText == "" &&
-		normalized.EducationText == "" &&
-		normalized.AdditionalInstructions == "" {
-		errs = append(errs, modelv1.ValidationError{Field: "experienceText", Message: "at least one notes field is required for from_notes mode"})
+		normalized.EducationText == "" {
+		errs = append(errs, modelv1.ValidationError{Field: "experienceText", Message: "at least one experience field is required for from_experience mode"})
 	}
 	if utf8.RuneCountInString(normalized.JobDescription) > maxJobDescriptionLength {
 		errs = append(errs, modelv1.ValidationError{Field: "jobDescription", Message: "jobDescription must be at most 30000 characters"})
@@ -578,12 +742,14 @@ func classifyServiceError(err error) (status int, code, message string, details 
 		return http.StatusGatewayTimeout, "RESUME_GENERATION_TIMEOUT", "resume generation timed out", nil
 	case errors.Is(err, ErrInvalidLLMOutput):
 		return http.StatusBadGateway, "RESUME_GENERATION_INVALID_OUTPUT", "invalid model output", nil
+	case errors.Is(err, ErrJobQueueNotConfigured):
+		return http.StatusInternalServerError, "internal_error", "resume generation queue is not configured", nil
 	case errors.Is(err, ErrNotFound):
 		return http.StatusNotFound, "not_found", "resume not found", nil
 	case errors.Is(err, ErrForbidden):
 		return http.StatusForbidden, "forbidden", "not allowed", nil
 	default:
-		return http.StatusInternalServerError, "internal_error", "failed to process resume", err
+		return http.StatusInternalServerError, "internal_error", "failed to process resume", nil
 	}
 }
 

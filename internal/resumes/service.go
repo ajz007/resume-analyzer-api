@@ -2,19 +2,24 @@ package resumes
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	"resume-backend/internal/queue"
 	modelv1 "resume-backend/resume/modelv1"
 	"resume-backend/resume/render"
 )
 
 type Service struct {
-	Repo Repo
-	LLM  LLMClient
+	Repo     Repo
+	JobRepo  GenerationJobRepo
+	LLM      LLMClient
+	JobQueue queue.Client
 }
 
 type createResumeOptions struct {
@@ -23,6 +28,8 @@ type createResumeOptions struct {
 	SourceResumeID  string
 	SourceVersionID string
 	OriginType      string
+	ResumeID        string
+	VersionID       string
 }
 
 func (s *Service) Create(ctx context.Context, ownerID, title string, resume modelv1.ResumeModel) (SaveResult, error) {
@@ -51,6 +58,8 @@ func (s *Service) createWithOptions(ctx context.Context, ownerID, title string, 
 	opts.SourceResumeID = strings.TrimSpace(opts.SourceResumeID)
 	opts.SourceVersionID = strings.TrimSpace(opts.SourceVersionID)
 	opts.OriginType = strings.TrimSpace(opts.OriginType)
+	opts.ResumeID = strings.TrimSpace(opts.ResumeID)
+	opts.VersionID = strings.TrimSpace(opts.VersionID)
 	if ownerID == "" || title == "" {
 		return SaveResult{}, ErrInvalidInput
 	}
@@ -70,13 +79,29 @@ func (s *Service) createWithOptions(ctx context.Context, ownerID, title string, 
 			return SaveResult{}, ErrInvalidInput
 		}
 	}
+	if opts.ResumeID != "" {
+		if _, err := uuid.Parse(opts.ResumeID); err != nil {
+			return SaveResult{}, ErrInvalidInput
+		}
+	}
+	if opts.VersionID != "" {
+		if _, err := uuid.Parse(opts.VersionID); err != nil {
+			return SaveResult{}, ErrInvalidInput
+		}
+	}
 	if errs := modelv1.ValidateStructure(resume); len(errs) > 0 {
 		return SaveResult{}, ValidationError{Errors: errs}
 	}
 
 	now := time.Now().UTC()
-	resumeID := uuid.NewString()
-	versionID := uuid.NewString()
+	resumeID := opts.ResumeID
+	if resumeID == "" {
+		resumeID = uuid.NewString()
+	}
+	versionID := opts.VersionID
+	if versionID == "" {
+		versionID = uuid.NewString()
+	}
 	record := Resume{
 		ID:               resumeID,
 		OwnerID:          ownerID,
@@ -103,12 +128,33 @@ func (s *Service) createWithOptions(ctx context.Context, ownerID, title string, 
 
 	created, err := s.Repo.Create(ctx, record, version)
 	if err != nil {
+		if isDuplicateCreateError(err) {
+			existing, getErr := s.Repo.GetByID(ctx, ownerID, resumeID)
+			if getErr != nil {
+				return SaveResult{}, err
+			}
+			return SaveResult{
+				Resume:            existing,
+				ReadinessWarnings: modelv1.ValidateReadiness(existing.CurrentResume),
+			}, nil
+		}
 		return SaveResult{}, err
 	}
 	return SaveResult{
 		Resume:            created,
 		ReadinessWarnings: modelv1.ValidateReadiness(resume),
 	}, nil
+}
+
+func isDuplicateCreateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrAlreadyExists) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func originTypeForSourceType(sourceType string) string {

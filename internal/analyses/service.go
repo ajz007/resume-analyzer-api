@@ -90,6 +90,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		return Analysis{}, ErrJobQueueNotConfigured
 	}
 	if err := s.JobQueue.Send(ctx, queue.Message{
+		Type:       queue.MessageTypeAnalysis,
 		AnalysisID: analysis.ID,
 		RequestID:  requestIDFromContext(ctx),
 		EnqueuedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -153,6 +154,7 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 			return createdAnalysis, created, ErrJobQueueNotConfigured
 		}
 		if err := s.JobQueue.Send(ctx, queue.Message{
+			Type:       queue.MessageTypeAnalysis,
 			AnalysisID: createdAnalysis.ID,
 			RequestID:  requestIDFromContext(ctx),
 			EnqueuedAt: time.Now().UTC().Format(time.RFC3339Nano),

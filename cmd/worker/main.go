@@ -18,6 +18,7 @@ import (
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	"resume-backend/internal/bootstrap"
+	"resume-backend/internal/queue"
 	"resume-backend/internal/shared/config"
 	"resume-backend/internal/shared/metrics"
 	"resume-backend/internal/shared/telemetry"
@@ -153,6 +154,25 @@ func handleMessage(ctx context.Context, app *bootstrap.App, client sqsAPI, queue
 				metrics.IncAnalysisJobsDeletedUnrecoverable()
 			}
 			return
+		case workerproc.ErrMissingJobID:
+			fields := baseFields(msg, "", e.RequestID)
+			fields["body_len"] = meta.BodyLen
+			fields["body_sha256"] = meta.BodySHA
+			telemetry.Error("worker.job.missing_id", fields)
+			if deleteMessage(ctx, client, queueURL, msg, "", e.RequestID) {
+				metrics.IncAnalysisJobsDeletedUnrecoverable()
+			}
+			return
+		case workerproc.ErrUnsupportedType:
+			fields := baseFields(msg, "", e.RequestID)
+			fields["body_len"] = meta.BodyLen
+			fields["body_sha256"] = meta.BodySHA
+			fields["message_type"] = e.MessageType
+			telemetry.Error("worker.message.unsupported_type", fields)
+			if deleteMessage(ctx, client, queueURL, msg, "", e.RequestID) {
+				metrics.IncAnalysisJobsDeletedUnrecoverable()
+			}
+			return
 		default:
 			fields := baseFields(msg, "", "")
 			fields["body_len"] = meta.BodyLen
@@ -168,27 +188,27 @@ func handleMessage(ctx context.Context, app *bootstrap.App, client sqsAPI, queue
 		}
 	}
 
-	telemetry.Info("worker.analysis.received", baseFields(msg, decoded.AnalysisID, decoded.RequestID))
+	telemetry.Info(workerReceivedEvent(decoded), baseFields(msg, messagePrimaryID(decoded), decoded.RequestID))
 
 	ctxWithParsed := workerproc.WithParsedMessage(ctx, decoded)
 	if err := workerproc.HandleMessage(ctxWithParsed, app, body); err != nil {
 		if procErr, ok := err.(workerproc.ErrProcess); ok {
-			fields := baseFields(msg, procErr.AnalysisID, procErr.RequestID)
+			fields := baseFields(msg, processPrimaryID(procErr), procErr.RequestID)
 			fields["error"] = procErr.Err.Error()
-			telemetry.Error("worker.analysis.failed", fields)
+			telemetry.Error(workerFailedEvent(procErr.Type), fields)
 			metrics.IncAnalysisJobsFailed()
 			return
 		}
 
-		fields := baseFields(msg, decoded.AnalysisID, decoded.RequestID)
+		fields := baseFields(msg, messagePrimaryID(decoded), decoded.RequestID)
 		fields["error"] = err.Error()
-		telemetry.Error("worker.analysis.failed", fields)
+		telemetry.Error(workerFailedEvent(decoded.Type), fields)
 		metrics.IncAnalysisJobsFailed()
 		return
 	}
 
-	if deleteMessage(ctx, client, queueURL, msg, decoded.AnalysisID, decoded.RequestID) {
-		telemetry.Info("worker.analysis.completed", baseFields(msg, decoded.AnalysisID, decoded.RequestID))
+	if deleteMessage(ctx, client, queueURL, msg, messagePrimaryID(decoded), decoded.RequestID) {
+		telemetry.Info(workerCompletedEvent(decoded), baseFields(msg, messagePrimaryID(decoded), decoded.RequestID))
 		metrics.IncAnalysisJobsCompleted()
 	}
 }
@@ -215,14 +235,52 @@ func deleteMessage(ctx context.Context, client sqsAPI, queueURL string, msg sqst
 
 func baseFields(msg sqstypes.Message, analysisID, requestID string) map[string]any {
 	fields := map[string]any{
-		"analysis_id":    analysisID,
+		"job_id":         analysisID,
 		"sqs_message_id": aws.ToString(msg.MessageId),
 		"receive_count":  receiveCount(msg),
+	}
+	if analysisID != "" {
+		fields["analysis_id"] = analysisID
 	}
 	if strings.TrimSpace(requestID) != "" {
 		fields["request_id"] = requestID
 	}
 	return fields
+}
+
+func messagePrimaryID(msg queue.Message) string {
+	if strings.TrimSpace(msg.JobID) != "" {
+		return msg.JobID
+	}
+	return msg.AnalysisID
+}
+
+func processPrimaryID(err workerproc.ErrProcess) string {
+	if strings.TrimSpace(err.JobID) != "" {
+		return err.JobID
+	}
+	return err.AnalysisID
+}
+
+func workerReceivedEvent(msg queue.Message) string {
+	if msg.Type == queue.MessageTypeResumeGeneration {
+		return "worker.resume_generation.received"
+	}
+	return "worker.analysis.received"
+}
+
+func workerFailedEvent(messageType string) string {
+	if messageType == queue.MessageTypeResumeGeneration {
+		return "worker.resume_generation.failed"
+	}
+	return "worker.analysis.failed"
+}
+
+func workerCompletedEvent(msg queue.Message) string {
+	if msg.Type == queue.MessageTypeResumeGeneration {
+		return "worker.resume_generation.completed"
+	}
+	return "worker.analysis.completed"
 }
 
 func receiveCount(msg sqstypes.Message) int {

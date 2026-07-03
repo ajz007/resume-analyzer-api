@@ -58,7 +58,20 @@ func TestValidateResumeTailoringResponseValid(t *testing.T) {
 		}},
 		MissingRequirements: []MissingRequirement{{
 			Requirement:    "Healthcare sales experience",
+			Message:        "Healthcare sales experience appears important for this role, but the resume does not clearly show it.",
+			Example:        "If true, consider adding: Built pipeline with healthcare provider and payer accounts across ___ territories.",
+			Risk:           "needs_user_confirmation",
 			Recommendation: "Ask the user whether they have healthcare sales experience before adding it.",
+		}},
+		Suggestions: []TailoringSuggestion{{
+			Type:    "safe_rewrite",
+			Section: "experience",
+			ItemID:  "exp-1-highlight-1",
+			Message: "This rewrite is supported by the existing resume and can be applied safely.",
+			Before:  "Increased qualified pipeline by 35% through account-based outbound campaigns.",
+			After:   "Increased qualified enterprise pipeline by 35% with targeted account-based outbound campaigns.",
+			Reason:  "Aligned the bullet with enterprise sales language from the job description.",
+			Risk:    "safe",
 		}},
 		Warnings: []ResponseWarning{{
 			Message: "One job requirement was not supported by the source resume.",
@@ -149,6 +162,17 @@ func TestValidateResumeTailoringResponseAddRequiresAfter(t *testing.T) {
 	assertStructuralError(t, ValidateResumeTailoringResponse(response), "changes[0].after")
 }
 
+func TestValidateResumeTailoringResponseMissingRequirementNeedsExample(t *testing.T) {
+	response := validTailoringResponse()
+	response.MissingRequirements = []MissingRequirement{{
+		Requirement: "Kubernetes",
+		Message:     "Kubernetes appears important for this role.",
+		Risk:        "needs_user_confirmation",
+	}}
+
+	assertStructuralError(t, ValidateResumeTailoringResponse(response), "missingRequirements[0].example")
+}
+
 func validTailoringResponse() ResumeTailoringResponse {
 	return ResumeTailoringResponse{
 		TailoredResume: completeResume(),
@@ -160,6 +184,16 @@ func validTailoringResponse() ResumeTailoringResponse {
 			After:      "Business development leader focused on SaaS pipeline generation and enterprise partnerships.",
 			Reason:     "Made the summary more specific to the target role.",
 			Risk:       "safe",
+		}},
+		Suggestions: []TailoringSuggestion{{
+			Type:    "safe_rewrite",
+			Section: "summary",
+			ItemID:  "summary",
+			Message: "This rewrite is supported by the current resume.",
+			Before:  "Business development leader with a record of building pipeline and closing enterprise partnerships.",
+			After:   "Business development leader focused on SaaS pipeline generation and enterprise partnerships.",
+			Reason:  "Made the summary more specific to the target role.",
+			Risk:    "safe",
 		}},
 	}
 }
