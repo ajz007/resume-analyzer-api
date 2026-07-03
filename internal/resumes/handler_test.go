@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"resume-backend/internal/bootstrap"
+	"resume-backend/internal/queue"
 	resumespkg "resume-backend/internal/resumes"
 	"resume-backend/internal/shared/auth"
 	"resume-backend/internal/shared/config"
@@ -27,6 +28,22 @@ type mockGenerationLLM struct {
 	err      error
 }
 
+type sequenceGenerationLLM struct {
+	responses []string
+	errors    []error
+	calls     int
+}
+
+type testQueueStub struct {
+	messages []queue.Message
+}
+
+func (s *testQueueStub) Send(ctx context.Context, msg queue.Message) error {
+	_ = ctx
+	s.messages = append(s.messages, msg)
+	return nil
+}
+
 func (m mockGenerationLLM) Complete(ctx context.Context, prompt string) (string, error) {
 	_ = ctx
 	_ = prompt
@@ -34,6 +51,35 @@ func (m mockGenerationLLM) Complete(ctx context.Context, prompt string) (string,
 		return "", m.err
 	}
 	return m.response, nil
+}
+
+func (m *sequenceGenerationLLM) Complete(ctx context.Context, prompt string) (string, error) {
+	_ = ctx
+	_ = prompt
+	call := m.calls
+	m.calls++
+	if call < len(m.errors) && m.errors[call] != nil {
+		return "", m.errors[call]
+	}
+	if call < len(m.responses) {
+		return m.responses[call], nil
+	}
+	if len(m.responses) > 0 {
+		return m.responses[len(m.responses)-1], nil
+	}
+	return "", nil
+}
+
+type llmCallSpy struct {
+	delegate resumespkg.LLMClient
+	called   *bool
+}
+
+func (s llmCallSpy) Complete(ctx context.Context, prompt string) (string, error) {
+	if s.called != nil {
+		*s.called = true
+	}
+	return s.delegate.Complete(ctx, prompt)
 }
 
 func TestResumesCreateSuccess(t *testing.T) {
@@ -202,26 +248,27 @@ func TestResumesGenerateValidResponseCreatesResume(t *testing.T) {
 
 	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", ownerID, generateRequestBody())
 
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d: %s", resp.Code, resp.Body.String())
 	}
-	assertNoLegacyResumeAliases(t, resp)
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.ID == "" {
-		t.Fatal("expected id")
+	var accepted generationAcceptedBody
+	decodeJSON(t, resp, &accepted)
+	if accepted.GenerationID == "" {
+		t.Fatal("expected generationId")
 	}
-	if body.CurrentVersionID == "" {
-		t.Fatal("expected currentVersionId")
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	if len(body.RequiresUserInput) != 1 {
-		t.Fatalf("expected requiresUserInput from LLM response, got %#v", body.RequiresUserInput)
+	body := getCompletedGeneration(t, app, ownerID, accepted.GenerationID)
+
+	if len(body.body.RequiresUserInput) != 1 {
+		t.Fatalf("expected requiresUserInput from LLM response, got %#v", body.body.RequiresUserInput)
 	}
-	if len(body.Warnings) != 1 {
-		t.Fatalf("expected warnings from LLM response, got %#v", body.Warnings)
+	if len(body.body.Warnings) != 1 {
+		t.Fatalf("expected warnings from LLM response, got %#v", body.body.Warnings)
 	}
 
-	versionsResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes/"+body.ID+"/versions", ownerID, nil)
+	versionsResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes/"+body.body.ResumeID+"/versions", ownerID, nil)
 	if versionsResp.Code != http.StatusOK {
 		t.Fatalf("expected versions status 200, got %d: %s", versionsResp.Code, versionsResp.Body.String())
 	}
@@ -250,15 +297,14 @@ func TestResumesGenerateLogsAndHandlesValidSmallJD(t *testing.T) {
 		"experienceText": "Alex worked at Acme on Go APIs.",
 	})
 
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d: %s", resp.Code, resp.Body.String())
 	}
 	for _, needle := range []string{
 		`"msg":"resume.generate.request.start"`,
 		`"msg":"resume.generate.request.end"`,
-		`"msg":"resume.generate.llm.start"`,
-		`"msg":"resume.generate.llm.finish"`,
-		`"generation_mode":"from_job_description"`,
+		`"msg":"resume.generate.accepted"`,
+		`"generation_mode":"from_experience"`,
 		`"job_description_length":28`,
 	} {
 		if !strings.Contains(logs, needle) {
@@ -292,22 +338,155 @@ func TestResumesGenerateOversizedJobDescriptionReturnsValidationError(t *testing
 	}
 }
 
+func TestResumesGenerateInvalidRequestDoesNotCreateJobOrEnqueue(t *testing.T) {
+	app := newTestApp(t)
+
+	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+		"title":          "Backend Engineer Resume",
+		"generationMode": resumespkg.GenerationModeFromJobDescription,
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+	queueStub, ok := app.Queue.(*testQueueStub)
+	if !ok {
+		t.Fatalf("expected queue stub, got %T", app.Queue)
+	}
+	if len(queueStub.messages) != 0 {
+		t.Fatalf("expected no queued messages, got %#v", queueStub.messages)
+	}
+}
+
 func TestResumesGenerateTimeoutReturnsStructuredError(t *testing.T) {
 	app := newTestApp(t)
 	app.ResumesService.LLM = mockGenerationLLM{err: context.DeadlineExceeded}
 
 	resp, logs := performJSONWithLogs(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
 
-	if resp.Code != http.StatusGatewayTimeout {
-		t.Fatalf("expected status 504, got %d: %s", resp.Code, resp.Body.String())
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d: %s", resp.Code, resp.Body.String())
 	}
-	var body errorResponseBody
-	decodeJSON(t, resp, &body)
-	if body.Error.Code != "RESUME_GENERATION_TIMEOUT" {
-		t.Fatalf("expected RESUME_GENERATION_TIMEOUT, got %#v", body.Error)
+	var accepted generationAcceptedBody
+	decodeJSON(t, resp, &accepted)
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err == nil {
+		t.Fatal("expected worker timeout failure")
 	}
-	if !strings.Contains(logs, `"msg":"resume.generate.llm.timeout"`) {
-		t.Fatalf("expected timeout log, got %s", logs)
+	pollResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resume-generations/"+accepted.GenerationID, "google:12345", nil)
+	if pollResp.Code != http.StatusOK {
+		t.Fatalf("expected poll status 200, got %d: %s", pollResp.Code, pollResp.Body.String())
+	}
+	var body generationFailedBody
+	decodeJSON(t, pollResp, &body)
+	if body.Status != resumespkg.GenerationJobStatusFailed {
+		t.Fatalf("expected failed status, got %#v", body)
+	}
+	if body.ErrorMessage != "Resume generation failed. Please try again." {
+		t.Fatalf("unexpected error message %#v", body)
+	}
+	if !strings.Contains(logs, `"msg":"resume.generate.accepted"`) {
+		t.Fatalf("expected accepted log, got %s", logs)
+	}
+}
+
+func TestResumesGenerateGetQueuedStatus(t *testing.T) {
+	app := newTestApp(t)
+	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var accepted generationAcceptedBody
+	decodeJSON(t, resp, &accepted)
+	pollResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resume-generations/"+accepted.GenerationID, "google:12345", nil)
+	if pollResp.Code != http.StatusOK {
+		t.Fatalf("expected poll status 200, got %d: %s", pollResp.Code, pollResp.Body.String())
+	}
+	var queued generationQueuedBody
+	decodeJSON(t, pollResp, &queued)
+	if queued.Status != resumespkg.GenerationJobStatusQueued {
+		t.Fatalf("expected queued status, got %#v", queued)
+	}
+}
+
+func TestResumesGenerateGetProcessingStatus(t *testing.T) {
+	app := newTestApp(t)
+	accepted := enqueueGeneration(t, app, "google:12345", generateRequestBody())
+
+	job, claimed, err := app.ResumesService.JobRepo.ClaimQueued(context.Background(), accepted.GenerationID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("claim queued job: %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claim to succeed, got %#v", job)
+	}
+
+	pollResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resume-generations/"+accepted.GenerationID, "google:12345", nil)
+	if pollResp.Code != http.StatusOK {
+		t.Fatalf("expected poll status 200, got %d: %s", pollResp.Code, pollResp.Body.String())
+	}
+	var processing generationQueuedBody
+	decodeJSON(t, pollResp, &processing)
+	if processing.Status != resumespkg.GenerationJobStatusProcessing {
+		t.Fatalf("expected processing status, got %#v", processing)
+	}
+	if processing.StartedAt == nil {
+		t.Fatalf("expected startedAt, got %#v", processing)
+	}
+}
+
+func TestResumesGenerateEnqueuesResumeGenerationMessageAndDoesNotCallLLMSynchronously(t *testing.T) {
+	app := newTestApp(t)
+	called := false
+	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{Resume: validResume()})}
+	original := app.ResumesService.LLM
+	app.ResumesService.LLM = llmCallSpy{
+		delegate: original,
+		called:   &called,
+	}
+
+	accepted := enqueueGeneration(t, app, "google:12345", generateRequestBody())
+	if called {
+		t.Fatal("expected LLM not to be called during enqueue")
+	}
+	queueStub, ok := app.Queue.(*testQueueStub)
+	if !ok {
+		t.Fatalf("expected queue stub, got %T", app.Queue)
+	}
+	if len(queueStub.messages) != 1 {
+		t.Fatalf("expected 1 queued message, got %d", len(queueStub.messages))
+	}
+	if queueStub.messages[0].Type != queue.MessageTypeResumeGeneration || queueStub.messages[0].JobID != accepted.GenerationID {
+		t.Fatalf("unexpected queued message %#v", queueStub.messages[0])
+	}
+}
+
+func TestResumesGenerationStatusForbiddenForDifferentOwner(t *testing.T) {
+	app := newTestApp(t)
+	accepted := enqueueGeneration(t, app, "google:owner", generateRequestBody())
+	resp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resume-generations/"+accepted.GenerationID, "google:other", nil)
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesGenerateDuplicateProcessingDoesNotCreateAnotherResume(t *testing.T) {
+	app := newTestApp(t)
+	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{Resume: validResume()})}
+	accepted := enqueueGeneration(t, app, "google:12345", generateRequestBody())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("first process generation job: %v", err)
+	}
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("second process generation job: %v", err)
+	}
+	listResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes", "google:12345", nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d: %s", listResp.Code, listResp.Body.String())
+	}
+	var list []map[string]any
+	decodeJSON(t, listResp, &list)
+	if len(list) != 1 {
+		t.Fatalf("expected one resume after duplicate processing, got %d", len(list))
 	}
 }
 
@@ -339,15 +518,13 @@ func TestResumesGenerateFromNotesModeStillWorks(t *testing.T) {
 	req := generateRequestBody()
 	req["generationMode"] = resumespkg.GenerationModeFromNotes
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", req)
-
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	accepted := enqueueGeneration(t, app, "google:12345", req)
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.ID == "" || body.CurrentVersionID == "" {
-		t.Fatalf("expected generated resume ids, got %#v", body)
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.ResumeID == "" || body.body.CurrentVersionID == "" {
+		t.Fatalf("expected generated resume ids, got %#v", body.body)
 	}
 }
 
@@ -358,29 +535,30 @@ func TestResumesGenerateFromJobDescriptionOnlyCreatesTemplateDraft(t *testing.T)
 		Resume: template,
 	})}
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+	accepted := enqueueGeneration(t, app, "google:12345", map[string]any{
 		"title":          "Backend Engineer Template",
 		"targetRole":     "Backend Engineer",
 		"seniority":      "Senior",
 		"generationMode": resumespkg.GenerationModeFromJobDescription,
 		"jobDescription": "We need Go, PostgreSQL, APIs, Kubernetes, and observability experience.",
 	})
-
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.Resume.Target.RoleTitle != "Backend Engineer" {
-		t.Fatalf("expected target role, got %#v", body.Resume.Target)
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.GenerationMode != resumespkg.GenerationModeSampleFromJobDescription || body.body.DraftType != "sample_template" {
+		t.Fatalf("expected sample template metadata, got %#v", body.body)
 	}
-	if len(body.RequiresUserInput) == 0 {
+	if body.body.Resume.Target.RoleTitle != "Backend Engineer" {
+		t.Fatalf("expected target role, got %#v", body.body.Resume.Target)
+	}
+	if len(body.body.RequiresUserInput) == 0 {
 		t.Fatal("expected requiresUserInput for JD-only template")
 	}
-	if !hasTestWarning(body.Warnings, jdTemplateWarningForTest) {
-		t.Fatalf("expected JD template warning, got %#v", body.Warnings)
+	if !hasTestWarning(body.body.Warnings, jdTemplateWarningForTest) {
+		t.Fatalf("expected JD template warning, got %#v", body.body.Warnings)
 	}
-	for _, exp := range body.Resume.Experience {
+	for _, exp := range body.body.Resume.Experience {
 		if exp.Company != "" && exp.Company != "[Your Company]" {
 			t.Fatalf("expected no invented company, got %q", exp.Company)
 		}
@@ -393,27 +571,75 @@ func TestResumesGenerateFromJobDescriptionOnlyCreatesTemplateDraft(t *testing.T)
 			}
 		}
 	}
+
+	getResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes/"+body.body.ResumeID, "google:12345", nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected get status 200, got %d: %s", getResp.Code, getResp.Body.String())
+	}
+	var getBody resumeBody
+	decodeJSON(t, getResp, &getBody)
+	if !getBody.SampleTemplate || getBody.DraftType != "sample_template" || getBody.GenerationMode != resumespkg.GenerationModeSampleFromJobDescription {
+		t.Fatalf("expected persisted sample template metadata on get, got %#v", getBody)
+	}
+
+	listResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes", "google:12345", nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d: %s", listResp.Code, listResp.Body.String())
+	}
+	var list []map[string]any
+	decodeJSON(t, listResp, &list)
+	if len(list) != 1 {
+		t.Fatalf("expected 1 resume, got %#v", list)
+	}
+	if list[0]["sampleTemplate"] != true || list[0]["draftType"] != "sample_template" {
+		t.Fatalf("expected sample template metadata on list item, got %#v", list[0])
+	}
 }
 
-func TestResumesGenerateFromJobDescriptionOnlyRejectsInventedFacts(t *testing.T) {
+func TestResumesGenerateFromJobDescriptionOnlyFallsBackWhenLLMInventsFacts(t *testing.T) {
 	app := newTestApp(t)
 	invented := jdOnlyTemplateResume()
+	invented.Basics.FullName = "Alex Rivera"
 	invented.Experience[0].Company = "Acme"
 	invented.Experience[0].StartDate = "2021-01"
 	invented.Experience[0].Highlights[0].Text = "Reduced latency by 40%."
+	invented.CustomSections = []modelv1.CustomSection{{
+		ID:    "custom-1",
+		Title: "Awards",
+		Items: []modelv1.CustomSectionItem{{
+			ID:   "custom-1-item-1",
+			Text: "President's Club 2024",
+		}},
+	}}
 	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{
 		Resume: invented,
 	})}
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+	accepted := enqueueGeneration(t, app, "google:12345", map[string]any{
 		"title":          "Backend Engineer Template",
 		"targetRole":     "Backend Engineer",
 		"generationMode": resumespkg.GenerationModeFromJobDescription,
 		"jobDescription": "We need Go and PostgreSQL.",
 	})
-
-	if resp.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("expected fallback instead of failure, got %v", err)
+	}
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if !body.body.FallbackUsed || body.body.DraftType != "sample_template" {
+		t.Fatalf("expected template fallback, got %#v", body.body)
+	}
+	for _, exp := range body.body.Resume.Experience {
+		if exp.Company != "[Your Company]" {
+			t.Fatalf("expected placeholder company after fallback, got %q", exp.Company)
+		}
+		if exp.StartDate != "" || exp.EndDate != "" {
+			t.Fatalf("expected no dates after fallback, got %q-%q", exp.StartDate, exp.EndDate)
+		}
+		for _, highlight := range exp.Highlights {
+			if strings.Contains(highlight.Text, "40%") {
+				t.Fatalf("expected fabricated metric to be removed in fallback, got %q", highlight.Text)
+			}
+		}
 	}
 }
 
@@ -428,31 +654,65 @@ func TestResumesGenerateFromJobDescriptionWithExperienceUsesProvidedExperienceOn
 		}},
 	})}
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+	accepted := enqueueGeneration(t, app, "google:12345", map[string]any{
 		"title":          "Backend Engineer Resume",
 		"targetRole":     "Backend Engineer",
 		"generationMode": resumespkg.GenerationModeFromJobDescription,
 		"jobDescription": "We need Go, PostgreSQL, APIs, and Kubernetes.",
 		"experienceText": "Alex worked at Acme as a Backend Engineer from 2021-01 to 2024-12 and used Go.",
 	})
-
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.Resume.Experience[0].Company != "Acme" {
-		t.Fatalf("expected provided company, got %q", body.Resume.Experience[0].Company)
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.Resume.Experience[0].Company != "Acme" {
+		t.Fatalf("expected provided company, got %q", body.body.Resume.Experience[0].Company)
 	}
-	for _, category := range body.Resume.Skills {
+	for _, category := range body.body.Resume.Skills {
 		for _, item := range category.Items {
 			if item.Name == "Kubernetes" {
 				t.Fatal("expected unsupported JD skill not to be silently added")
 			}
 		}
 	}
-	if len(body.Warnings) == 0 {
+	if len(body.body.Warnings) == 0 {
 		t.Fatal("expected warning for unsupported JD requirement")
+	}
+}
+
+func TestResumesGenerateFromExperienceRejectsInstructionsOnly(t *testing.T) {
+	app := newTestApp(t)
+
+	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+		"title":                  "Backend Engineer Resume",
+		"generationMode":         resumespkg.GenerationModeFromExperience,
+		"additionalInstructions": "Keep it ATS friendly.",
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResumesGenerateLegacyJDModeWithInstructionsOnlyNormalizesToSampleTemplate(t *testing.T) {
+	app := newTestApp(t)
+	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{
+		Resume: jdOnlyTemplateResume(),
+	})}
+
+	accepted := enqueueGeneration(t, app, "google:12345", map[string]any{
+		"title":                  "Backend Engineer Template",
+		"targetRole":             "Backend Engineer",
+		"generationMode":         resumespkg.GenerationModeFromJobDescription,
+		"jobDescription":         "We need Go and PostgreSQL.",
+		"additionalInstructions": "Keep it ATS friendly.",
+	})
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
+	}
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.GenerationMode != resumespkg.GenerationModeSampleFromJobDescription || body.body.DraftType != "sample_template" {
+		t.Fatalf("expected legacy JD-only mode to normalize to sample template, got %#v", body.body)
 	}
 }
 
@@ -460,28 +720,26 @@ func TestResumesGenerateBlankCreatesMinimalDraftWithoutLLM(t *testing.T) {
 	app := newTestApp(t)
 	app.ResumesService.LLM = nil
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", map[string]any{
+	accepted := enqueueGeneration(t, app, "google:12345", map[string]any{
 		"title":          "Blank Resume",
 		"targetRole":     "Backend Engineer",
 		"seniority":      "Senior",
 		"generationMode": resumespkg.GenerationModeBlank,
 	})
-
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.Resume.SchemaVersion != modelv1.SchemaVersion {
-		t.Fatalf("expected schema version %q, got %q", modelv1.SchemaVersion, body.Resume.SchemaVersion)
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.Resume.SchemaVersion != modelv1.SchemaVersion {
+		t.Fatalf("expected schema version %q, got %q", modelv1.SchemaVersion, body.body.Resume.SchemaVersion)
 	}
-	if body.Resume.Target.RoleTitle != "Backend Engineer" {
-		t.Fatalf("expected target role to be preserved, got %#v", body.Resume.Target)
+	if body.body.Resume.Target.RoleTitle != "Backend Engineer" {
+		t.Fatalf("expected target role to be preserved, got %#v", body.body.Resume.Target)
 	}
-	if len(body.Resume.Experience) != 0 {
-		t.Fatalf("expected blank experience, got %#v", body.Resume.Experience)
+	if len(body.body.Resume.Experience) != 0 {
+		t.Fatalf("expected blank experience, got %#v", body.body.Resume.Experience)
 	}
-	if len(body.ReadinessWarnings) == 0 {
+	if len(body.body.ReadinessWarnings) == 0 {
 		t.Fatal("expected readiness warnings for blank draft")
 	}
 }
@@ -500,31 +758,48 @@ func TestResumesGenerateInvalidGenerationModeRejected(t *testing.T) {
 	}
 }
 
-func TestResumesGenerateInvalidAIResponseIsRejected(t *testing.T) {
+func TestResumesGenerateInvalidFirstLLMOutputIsRepairedAndCompleted(t *testing.T) {
 	app := newTestApp(t)
 	invalid := validResume()
 	invalid.SchemaVersion = "resume.v2"
-	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{Resume: invalid})}
+	invalid.Experience[0].ID = ""
+	invalid.Experience[0].Highlights[0].ID = ""
+	invalid.Experience[0].StartDate = "2024"
+	invalid.Experience[0].EmploymentType = "permanent"
+	invalid.Experience[0].Highlights[0].Source = "generated"
+	invalid.SectionOrder = []string{"summary", "summary", "unknown"}
+	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{
+		Resume: invalid,
+		RequiresUserInput: []modelv1.RequiresUserInput{{
+			Field:    "experience[0].startDate",
+			Message:  "Need exact date.",
+			Severity: "later",
+		}},
+	})}
 	ownerID := "google:12345"
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", ownerID, generateRequestBody())
-
-	if resp.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502, got %d: %s", resp.Code, resp.Body.String())
+	accepted := enqueueGeneration(t, app, ownerID, generateRequestBody())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("expected repair to complete, got %v", err)
 	}
-	var body errorResponseBody
-	decodeJSON(t, resp, &body)
-	if body.Error.Code != "RESUME_GENERATION_INVALID_OUTPUT" {
-		t.Fatalf("expected RESUME_GENERATION_INVALID_OUTPUT, got %#v", body.Error)
+	body := getCompletedGeneration(t, app, ownerID, accepted.GenerationID)
+	if body.body.Resume.SchemaVersion != modelv1.SchemaVersion {
+		t.Fatalf("expected repaired schema version, got %#v", body.body.Resume.SchemaVersion)
 	}
-	listResp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resumes", ownerID, nil)
-	if listResp.Code != http.StatusOK {
-		t.Fatalf("expected list status 200, got %d: %s", listResp.Code, listResp.Body.String())
+	if body.body.Resume.Experience[0].ID == "" || body.body.Resume.Experience[0].Highlights[0].ID == "" {
+		t.Fatalf("expected repaired ids, got %#v", body.body.Resume.Experience[0])
 	}
-	var list []map[string]any
-	decodeJSON(t, listResp, &list)
-	if len(list) != 0 {
-		t.Fatalf("expected invalid AI response not to save a resume, got %d", len(list))
+	if body.body.Resume.Experience[0].StartDate != "" {
+		t.Fatalf("expected invalid date to be cleared, got %#v", body.body.Resume.Experience[0].StartDate)
+	}
+	if body.body.Resume.Experience[0].EmploymentType != "" {
+		t.Fatalf("expected invalid employment type to be cleared, got %#v", body.body.Resume.Experience[0].EmploymentType)
+	}
+	if body.body.Resume.Experience[0].Highlights[0].Source != "ai_generated" {
+		t.Fatalf("expected invalid source to be repaired, got %#v", body.body.Resume.Experience[0].Highlights[0].Source)
+	}
+	if body.body.FallbackUsed {
+		t.Fatalf("expected repair without fallback, got %#v", body.body)
 	}
 }
 
@@ -535,58 +810,100 @@ func TestResumesGenerateMissingIDsAreSanitized(t *testing.T) {
 	resume.Experience[0].Highlights[0].ID = ""
 	app.ResumesService.LLM = mockGenerationLLM{response: generationResponseJSON(t, modelv1.ResumeGenerationResponse{Resume: resume})}
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
-
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	accepted := enqueueGeneration(t, app, "google:12345", generateRequestBody())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	assertNoLegacyResumeAliases(t, resp)
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.Resume.Experience[0].ID == "" {
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.Resume.Experience[0].ID == "" {
 		t.Fatal("expected sanitized experience id")
 	}
-	if body.Resume.Experience[0].Highlights[0].ID == "" {
+	if body.body.Resume.Experience[0].Highlights[0].ID == "" {
 		t.Fatal("expected sanitized highlight id")
 	}
 }
 
-func TestResumesGenerateRejectsMalformedAIResponse(t *testing.T) {
+func TestResumesGenerateInvalidFirstOutputTriggersRetryAndCompletes(t *testing.T) {
 	app := newTestApp(t)
-	app.ResumesService.LLM = mockGenerationLLM{response: `{"resume":`}
+	seq := &sequenceGenerationLLM{
+		responses: []string{
+			`{"resume":`,
+			generationResponseJSON(t, modelv1.ResumeGenerationResponse{Resume: validResume()}),
+		},
+	}
+	app.ResumesService.LLM = seq
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
-
-	if resp.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502, got %d: %s", resp.Code, resp.Body.String())
+	accepted := enqueueGeneration(t, app, "google:12345", generateRequestBody())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("expected retry to complete, got %v", err)
+	}
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.ResumeID == "" || seq.calls < 2 {
+		t.Fatalf("expected retry success, calls=%d body=%#v", seq.calls, body.body)
+	}
+	if body.body.FallbackUsed {
+		t.Fatalf("expected retry success without fallback, got %#v", body.body)
 	}
 }
 
-func TestResumesGenerateRejectsWrappedAIResponse(t *testing.T) {
+func TestResumesGenerateInvalidOutputAfterRetryFallsBackToTemplateForJDOnly(t *testing.T) {
 	app := newTestApp(t)
-	app.ResumesService.LLM = mockGenerationLLM{response: "```json\n" + generationResponseJSON(t, modelv1.ResumeGenerationResponse{Resume: validResume()}) + "\n```"}
-
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
-
-	if resp.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502, got %d: %s", resp.Code, resp.Body.String())
+	seq := &sequenceGenerationLLM{
+		responses: []string{
+			`{"resume":`,
+			`{"resume":`,
+		},
 	}
-}
+	app.ResumesService.LLM = seq
 
-func TestResumesGenerateRejectsMissingWrapperKeys(t *testing.T) {
-	app := newTestApp(t)
-	data, err := json.Marshal(map[string]any{
-		"resume": validResume(),
+	accepted := enqueueGeneration(t, app, "google:12345", map[string]any{
+		"title":          "Backend Engineer Template",
+		"targetRole":     "Backend Engineer",
+		"generationMode": resumespkg.GenerationModeFromJobDescription,
+		"jobDescription": "Java backend engineer role using Spring Boot and PostgreSQL.",
 	})
-	if err != nil {
-		t.Fatalf("marshal response: %v", err)
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("expected template fallback, got %v", err)
 	}
-	app.ResumesService.LLM = mockGenerationLLM{response: string(data)}
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if !body.body.FallbackUsed || body.body.DraftType != "sample_template" {
+		t.Fatalf("expected template fallback metadata, got %#v", body.body)
+	}
+	if !hasTestWarning(body.body.Warnings, jdTemplateWarningForTest) {
+		t.Fatalf("expected JD template warning, got %#v", body.body.Warnings)
+	}
+	if body.body.Resume.Experience[0].Company != "[Your Company]" || body.body.Resume.Experience[0].StartDate != "" {
+		t.Fatalf("expected safe template placeholders, got %#v", body.body.Resume.Experience[0])
+	}
+}
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
+func TestResumesGenerateFromNotesFallbackCreatesPartialDraftInsteadOfFailing(t *testing.T) {
+	app := newTestApp(t)
+	seq := &sequenceGenerationLLM{
+		responses: []string{
+			`{"resume":`,
+			`{"resume":`,
+		},
+	}
+	app.ResumesService.LLM = seq
 
-	if resp.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502, got %d: %s", resp.Code, resp.Body.String())
+	req := generateRequestBody()
+	req["generationMode"] = resumespkg.GenerationModeFromNotes
+	accepted := enqueueGeneration(t, app, "google:12345", req)
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("expected partial draft fallback, got %v", err)
+	}
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if !body.body.FallbackUsed || body.body.DraftType != "resume_draft" {
+		t.Fatalf("expected partial draft metadata, got %#v", body.body)
+	}
+	if len(body.body.RequiresUserInput) == 0 || body.body.ResumeID == "" {
+		t.Fatalf("expected completed partial draft, got %#v", body.body)
+	}
+	for _, section := range body.body.Resume.CustomSections {
+		if section.Title == "Additional Notes" {
+			t.Fatalf("expected additional instructions not to be persisted as resume content, got %#v", body.body.Resume.CustomSections)
+		}
 	}
 }
 
@@ -604,25 +921,22 @@ func TestResumesGenerateIncompleteStructurallyValidResumeSavesWithReadinessWarni
 		}},
 	})}
 
-	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", "google:12345", generateRequestBody())
-
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d: %s", resp.Code, resp.Body.String())
+	accepted := enqueueGeneration(t, app, "google:12345", generateRequestBody())
+	if err := app.ResumesService.ProcessResumeGenerationJob(context.Background(), accepted.GenerationID); err != nil {
+		t.Fatalf("process generation job: %v", err)
 	}
-	assertNoLegacyResumeAliases(t, resp)
-	var body generateBody
-	decodeJSON(t, resp, &body)
-	if body.ID == "" || body.CurrentVersionID == "" {
-		t.Fatalf("expected saved resume ids, got %#v", body)
+	body := getCompletedGeneration(t, app, "google:12345", accepted.GenerationID)
+	if body.body.ResumeID == "" || body.body.CurrentVersionID == "" {
+		t.Fatalf("expected saved resume ids, got %#v", body.body)
 	}
-	if len(body.ReadinessWarnings) == 0 {
+	if len(body.body.ReadinessWarnings) == 0 {
 		t.Fatal("expected readiness warnings")
 	}
-	if len(body.RequiresUserInput) != 1 {
-		t.Fatalf("expected requiresUserInput, got %#v", body.RequiresUserInput)
+	if len(body.body.RequiresUserInput) != 1 {
+		t.Fatalf("expected requiresUserInput, got %#v", body.body.RequiresUserInput)
 	}
-	if len(body.Warnings) != 1 {
-		t.Fatalf("expected anti-fabrication warning, got %#v", body.Warnings)
+	if len(body.body.Warnings) != 1 {
+		t.Fatalf("expected anti-fabrication warning, got %#v", body.body.Warnings)
 	}
 }
 
@@ -645,6 +959,9 @@ func TestResumesTailorValidResponseCreatesTailoredResume(t *testing.T) {
 		}},
 		MissingRequirements: []modelv1.MissingRequirement{{
 			Requirement:    "Kubernetes",
+			Message:        "Kubernetes appears important for this job, but the resume does not clearly show it.",
+			Example:        "If true, consider adding: Deployed and operated Spring Boot services on Kubernetes across ___ environments.",
+			Risk:           "needs_user_confirmation",
 			Recommendation: "Add only if the candidate has real Kubernetes experience.",
 		}},
 		Warnings: []modelv1.ResponseWarning{{
@@ -680,6 +997,12 @@ func TestResumesTailorValidResponseCreatesTailoredResume(t *testing.T) {
 	}
 	if len(body.MissingRequirements) != 1 || body.MissingRequirements[0].Requirement != "Kubernetes" {
 		t.Fatalf("expected missing Kubernetes requirement, got %#v", body.MissingRequirements)
+	}
+	if len(body.Suggestions) < 2 {
+		t.Fatalf("expected suggestions derived from tailoring guidance, got %#v", body.Suggestions)
+	}
+	if !hasSuggestionType(body.Suggestions, "missing_requirement") || !hasSuggestionType(body.Suggestions, "sample_example") {
+		t.Fatalf("expected missing requirement and sample example suggestions, got %#v", body.Suggestions)
 	}
 	if len(body.Warnings) != 1 {
 		t.Fatalf("expected warning, got %#v", body.Warnings)
@@ -1209,6 +1532,9 @@ type resumeBody struct {
 	ID                string                      `json:"id"`
 	Title             string                      `json:"title"`
 	Status            string                      `json:"status"`
+	DraftType         string                      `json:"draftType"`
+	GenerationMode    string                      `json:"generationMode"`
+	SampleTemplate    bool                        `json:"sampleTemplate"`
 	CurrentVersionID  string                      `json:"currentVersionId"`
 	Resume            modelv1.ResumeModel         `json:"resume"`
 	ReadinessWarnings []modelv1.ValidationWarning `json:"readinessWarnings"`
@@ -1220,6 +1546,47 @@ type errorResponseBody struct {
 		Message string                    `json:"message"`
 		Details []modelv1.ValidationError `json:"details"`
 	} `json:"error"`
+}
+
+type generationAcceptedBody struct {
+	GenerationID string `json:"generationId"`
+	Status       string `json:"status"`
+}
+
+type generationQueuedBody struct {
+	GenerationID string     `json:"generationId"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	StartedAt    *time.Time `json:"startedAt"`
+	CompletedAt  *time.Time `json:"completedAt"`
+}
+
+type generationFailedBody struct {
+	GenerationID string     `json:"generationId"`
+	Status       string     `json:"status"`
+	ErrorMessage string     `json:"errorMessage"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	StartedAt    *time.Time `json:"startedAt"`
+	CompletedAt  *time.Time `json:"completedAt"`
+}
+
+type generationCompletedBody struct {
+	GenerationID      string                      `json:"generationId"`
+	Status            string                      `json:"status"`
+	ResumeID          string                      `json:"resumeId"`
+	CurrentVersionID  string                      `json:"currentVersionId"`
+	Resume            modelv1.ResumeModel         `json:"resume"`
+	RequiresUserInput []modelv1.RequiresUserInput `json:"requiresUserInput"`
+	Assumptions       []modelv1.Assumption        `json:"assumptions"`
+	Warnings          []modelv1.ResponseWarning   `json:"warnings"`
+	ReadinessWarnings []modelv1.ValidationWarning `json:"readinessWarnings"`
+	GenerationMode    string                      `json:"generationMode"`
+	FallbackUsed      bool                        `json:"fallbackUsed"`
+	FallbackReason    string                      `json:"fallbackReason"`
+	DraftType         string                      `json:"draftType"`
+	CreatedAt         time.Time                   `json:"createdAt"`
+	StartedAt         *time.Time                  `json:"startedAt"`
+	CompletedAt       *time.Time                  `json:"completedAt"`
 }
 
 type generateBody struct {
@@ -1235,17 +1602,18 @@ type generateBody struct {
 }
 
 type tailorBody struct {
-	SourceResumeID      string                       `json:"sourceResumeId"`
-	SourceVersionID     string                       `json:"sourceVersionId"`
-	ID                  string                       `json:"id"`
-	Title               string                       `json:"title"`
-	Status              string                       `json:"status"`
-	CurrentVersionID    string                       `json:"currentVersionId"`
-	Resume              modelv1.ResumeModel          `json:"resume"`
-	Changes             []modelv1.TailoringChange    `json:"changes"`
-	MissingRequirements []modelv1.MissingRequirement `json:"missingRequirements"`
-	Warnings            []modelv1.ResponseWarning    `json:"warnings"`
-	ReadinessWarnings   []modelv1.ValidationWarning  `json:"readinessWarnings"`
+	SourceResumeID      string                        `json:"sourceResumeId"`
+	SourceVersionID     string                        `json:"sourceVersionId"`
+	ID                  string                        `json:"id"`
+	Title               string                        `json:"title"`
+	Status              string                        `json:"status"`
+	CurrentVersionID    string                        `json:"currentVersionId"`
+	Resume              modelv1.ResumeModel           `json:"resume"`
+	Changes             []modelv1.TailoringChange     `json:"changes"`
+	MissingRequirements []modelv1.MissingRequirement  `json:"missingRequirements"`
+	Suggestions         []modelv1.TailoringSuggestion `json:"suggestions"`
+	Warnings            []modelv1.ResponseWarning     `json:"warnings"`
+	ReadinessWarnings   []modelv1.ValidationWarning   `json:"readinessWarnings"`
 }
 
 type versionBody struct {
@@ -1274,7 +1642,15 @@ func newTestApp(t *testing.T) *bootstrap.App {
 	if err != nil {
 		t.Fatalf("bootstrap build: %v", err)
 	}
+	queueStub := &testQueueStub{}
+	app.Queue = queueStub
+	app.ResumesService.JobQueue = queueStub
 	return app
+}
+
+type completedGenerationResult struct {
+	response *httptest.ResponseRecorder
+	body     generationCompletedBody
 }
 
 func createResume(t *testing.T, router *gin.Engine, ownerID, title string, resume modelv1.ResumeModel) resumeBody {
@@ -1289,6 +1665,31 @@ func createResume(t *testing.T, router *gin.Engine, ownerID, title string, resum
 	var body resumeBody
 	decodeJSON(t, resp, &body)
 	return body
+}
+
+func enqueueGeneration(t *testing.T, app *bootstrap.App, ownerID string, body any) generationAcceptedBody {
+	t.Helper()
+	resp := performJSON(t, app.Router, http.MethodPost, "/api/v1/resumes/generate", ownerID, body)
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var accepted generationAcceptedBody
+	decodeJSON(t, resp, &accepted)
+	if accepted.GenerationID == "" {
+		t.Fatalf("expected generationId, got %#v", accepted)
+	}
+	return accepted
+}
+
+func getCompletedGeneration(t *testing.T, app *bootstrap.App, ownerID, generationID string) completedGenerationResult {
+	t.Helper()
+	resp := performJSON(t, app.Router, http.MethodGet, "/api/v1/resume-generations/"+generationID, ownerID, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected poll status 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body generationCompletedBody
+	decodeJSON(t, resp, &body)
+	return completedGenerationResult{response: resp, body: body}
 }
 
 func performJSON(t *testing.T, router *gin.Engine, method, path, ownerID string, body any) *httptest.ResponseRecorder {
@@ -1442,6 +1843,9 @@ func tailoringResponseJSON(t *testing.T, response modelv1.ResumeTailoringRespons
 	if response.MissingRequirements == nil {
 		response.MissingRequirements = []modelv1.MissingRequirement{}
 	}
+	if response.Suggestions == nil {
+		response.Suggestions = []modelv1.TailoringSuggestion{}
+	}
 	if response.Warnings == nil {
 		response.Warnings = []modelv1.ResponseWarning{}
 	}
@@ -1488,6 +1892,9 @@ func validTailoringResponseForTest() modelv1.ResumeTailoringResponse {
 		}},
 		MissingRequirements: []modelv1.MissingRequirement{{
 			Requirement:    "Kubernetes",
+			Message:        "Kubernetes appears important for this job, but your resume does not clearly show it.",
+			Example:        "If true, consider adding: Deployed and operated Spring Boot services on Kubernetes across ___ environments.",
+			Risk:           "needs_user_confirmation",
 			Recommendation: "Ask the user whether they have Kubernetes experience before adding it.",
 		}},
 		Warnings: []modelv1.ResponseWarning{{
@@ -1496,11 +1903,20 @@ func validTailoringResponseForTest() modelv1.ResumeTailoringResponse {
 	}
 }
 
-const jdTemplateWarningForTest = "This is a role-targeted template generated from the job description, not a complete resume. Add your real experience before applying."
+const jdTemplateWarningForTest = "This is a sample resume template generated from the job description, not your completed resume. Replace examples with your real experience before applying."
 
 func hasTestWarning(warnings []modelv1.ResponseWarning, message string) bool {
 	for _, warning := range warnings {
 		if warning.Message == message {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSuggestionType(items []modelv1.TailoringSuggestion, value string) bool {
+	for _, item := range items {
+		if item.Type == value {
 			return true
 		}
 	}
@@ -1514,7 +1930,7 @@ func jdOnlyTemplateResume() modelv1.ResumeModel {
 			RoleTitle: "Backend Engineer",
 			Seniority: "Senior",
 		},
-		Summary: modelv1.Summary{Text: "Role-targeted backend engineering template. Replace placeholders with your real experience before applying."},
+		Summary: modelv1.Summary{Text: "Example summary: Replace placeholders with your real experience before applying."},
 		Experience: []modelv1.Experience{{
 			ID:        "exp-template-1",
 			Company:   "[Your Company]",
@@ -1523,7 +1939,7 @@ func jdOnlyTemplateResume() modelv1.ResumeModel {
 			EndDate:   "",
 			Highlights: []modelv1.Highlight{{
 				ID:     "exp-template-1-highlight-1",
-				Text:   "Describe a backend API, database, or reliability contribution supported by your real work.",
+				Text:   "Example: Describe a backend API, database, or reliability contribution supported by your real work.",
 				Source: "ai_generated",
 			}},
 		}},

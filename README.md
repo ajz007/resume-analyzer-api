@@ -29,6 +29,36 @@ Phase 2 tests cover DOCX/apply paths and are behind a tag:
 `go test -tags phase2 ./...`
 Run both locally when touching DOCX or apply flows.
 
+## Database Migrations
+
+Run schema migrations only through `cmd/migrate`.
+
+Local / any environment with `DATABASE_URL` set:
+
+```bash
+DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require" go run ./cmd/migrate
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
+go run ./cmd/migrate
+```
+
+Important for async resume generation:
+- migration `0022_resume_generation_jobs.sql` must be applied before `POST /api/v1/resumes/generate` will work
+- migration `0023_resume_generation_error_type.sql` adds the `error_type` field used for operator diagnostics
+- if it is missing, the API can fail before enqueue with a database error
+
+Quick verification:
+
+```sql
+SELECT to_regclass('public.resume_generation_jobs');
+```
+
+If that returns `NULL`, the async resume generation table has not been created yet.
+
 ## API
 
 ### Download generated resume

@@ -25,6 +25,13 @@ var tailoringRisks = map[string]bool{
 	"unsafe":                  true,
 }
 
+var tailoringSuggestionTypes = map[string]bool{
+	"safe_rewrite":        true,
+	"needs_confirmation":  true,
+	"missing_requirement": true,
+	"sample_example":      true,
+}
+
 // ValidateResumeGenerationResponse returns hard validation errors for the
 // future AI generation response contract.
 func ValidateResumeGenerationResponse(response ResumeGenerationResponse) []ValidationError {
@@ -74,11 +81,33 @@ func ValidateResumeTailoringResponse(response ResumeTailoringResponse) []Validat
 	}
 	for i, requirement := range response.MissingRequirements {
 		requirementField := fmt.Sprintf("missingRequirements[%d].requirement", i)
-		recommendationField := fmt.Sprintf("missingRequirements[%d].recommendation", i)
+		messageField := fmt.Sprintf("missingRequirements[%d].message", i)
+		exampleField := fmt.Sprintf("missingRequirements[%d].example", i)
+		riskField := fmt.Sprintf("missingRequirements[%d].risk", i)
 		errs = appendRequiredStringError(errs, requirementField, requirement.Requirement)
-		errs = appendRequiredStringError(errs, recommendationField, requirement.Recommendation)
+		errs = appendRequiredStringError(errs, messageField, requirement.Message)
+		errs = appendRequiredStringError(errs, exampleField, requirement.Example)
+		errs = appendRequiredEnumError(errs, riskField, requirement.Risk, tailoringRisks)
 		errs = appendMaxLengthError(errs, requirementField, requirement.Requirement, 500)
-		errs = appendMaxLengthError(errs, recommendationField, requirement.Recommendation, 700)
+		errs = appendMaxLengthError(errs, messageField, requirement.Message, 700)
+		errs = appendMaxLengthError(errs, exampleField, requirement.Example, 700)
+		errs = appendMaxLengthError(errs, fmt.Sprintf("missingRequirements[%d].recommendation", i), requirement.Recommendation, 700)
+	}
+	for i, suggestion := range response.Suggestions {
+		prefix := fmt.Sprintf("suggestions[%d]", i)
+		errs = appendRequiredEnumError(errs, prefix+".type", suggestion.Type, tailoringSuggestionTypes)
+		errs = appendRequiredStringError(errs, prefix+".message", suggestion.Message)
+		errs = appendMaxLengthError(errs, prefix+".section", suggestion.Section, 120)
+		errs = appendMaxLengthError(errs, prefix+".itemId", suggestion.ItemID, 120)
+		errs = appendMaxLengthError(errs, prefix+".requirement", suggestion.Requirement, 500)
+		errs = appendMaxLengthError(errs, prefix+".message", suggestion.Message, 700)
+		errs = appendMaxLengthError(errs, prefix+".example", suggestion.Example, 700)
+		errs = appendMaxLengthError(errs, prefix+".before", suggestion.Before, 1000)
+		errs = appendMaxLengthError(errs, prefix+".after", suggestion.After, 1000)
+		errs = appendMaxLengthError(errs, prefix+".reason", suggestion.Reason, 700)
+		if strings.TrimSpace(suggestion.Risk) != "" {
+			errs = appendRequiredEnumError(errs, prefix+".risk", suggestion.Risk, tailoringRisks)
+		}
 	}
 	for i, warning := range response.Warnings {
 		field := fmt.Sprintf("warnings[%d].message", i)

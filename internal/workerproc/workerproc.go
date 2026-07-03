@@ -10,6 +10,7 @@ import (
 	"resume-backend/internal/analyses"
 	"resume-backend/internal/bootstrap"
 	"resume-backend/internal/queue"
+	"resume-backend/internal/resumes"
 )
 
 // MessageMeta captures details useful for logging and diagnostics.
@@ -55,9 +56,31 @@ type ErrMissingAnalysisID struct {
 
 func (e ErrMissingAnalysisID) Error() string { return "missing analysis id" }
 
+type ErrMissingJobID struct {
+	Meta      MessageMeta
+	RequestID string
+}
+
+func (e ErrMissingJobID) Error() string { return "missing job id" }
+
+type ErrUnsupportedType struct {
+	Meta        MessageMeta
+	MessageType string
+	RequestID   string
+}
+
+func (e ErrUnsupportedType) Error() string {
+	if strings.TrimSpace(e.MessageType) == "" {
+		return "unsupported message type"
+	}
+	return "unsupported message type: " + e.MessageType
+}
+
 // ErrProcess indicates processing failed after successful parsing.
 type ErrProcess struct {
+	Type       string
 	AnalysisID string
+	JobID      string
 	RequestID  string
 	Err        error
 }
@@ -80,8 +103,17 @@ func ParseMessage(body string) (queue.Message, MessageMeta, error) {
 	if err != nil {
 		return queue.Message{}, meta, ErrDecode{Meta: meta, Err: err}
 	}
-	if strings.TrimSpace(msg.AnalysisID) == "" {
-		return msg, meta, ErrMissingAnalysisID{Meta: meta, RequestID: msg.RequestID}
+	switch strings.TrimSpace(msg.Type) {
+	case "", queue.MessageTypeAnalysis:
+		if strings.TrimSpace(msg.AnalysisID) == "" {
+			return msg, meta, ErrMissingAnalysisID{Meta: meta, RequestID: msg.RequestID}
+		}
+	case queue.MessageTypeResumeGeneration:
+		if strings.TrimSpace(msg.JobID) == "" {
+			return msg, meta, ErrMissingJobID{Meta: meta, RequestID: msg.RequestID}
+		}
+	default:
+		return queue.Message{}, meta, ErrUnsupportedType{Meta: meta, MessageType: strings.TrimSpace(msg.Type), RequestID: msg.RequestID}
 	}
 	return msg, meta, nil
 }
@@ -123,13 +155,29 @@ func HandleMessage(ctx context.Context, app *bootstrap.App, body string) error {
 		}
 	}
 
-	if strings.TrimSpace(msg.AnalysisID) == "" {
-		return ErrMissingAnalysisID{Meta: ComputeMeta(body), RequestID: msg.RequestID}
+	switch strings.TrimSpace(msg.Type) {
+	case "", queue.MessageTypeAnalysis:
+		if strings.TrimSpace(msg.AnalysisID) == "" {
+			return ErrMissingAnalysisID{Meta: ComputeMeta(body), RequestID: msg.RequestID}
+		}
+		ctxWithRequest := analyses.WithRequestID(ctx, msg.RequestID)
+		if err := processor.ProcessAnalysis(ctxWithRequest, msg.AnalysisID); err != nil {
+			return ErrProcess{Type: queue.MessageTypeAnalysis, AnalysisID: msg.AnalysisID, RequestID: msg.RequestID, Err: err}
+		}
+		return nil
+	case queue.MessageTypeResumeGeneration:
+		if strings.TrimSpace(msg.JobID) == "" {
+			return ErrMissingJobID{Meta: ComputeMeta(body), RequestID: msg.RequestID}
+		}
+		if app.ResumeGenerationProcessor == nil {
+			return errors.New("resume generation processor not configured")
+		}
+		ctxWithRequest := resumes.WithRequestLogContext(ctx, msg.RequestID, "")
+		if err := app.ResumeGenerationProcessor.ProcessResumeGenerationJob(ctxWithRequest, msg.JobID); err != nil {
+			return ErrProcess{Type: queue.MessageTypeResumeGeneration, JobID: msg.JobID, RequestID: msg.RequestID, Err: err}
+		}
+		return nil
+	default:
+		return errors.New("unsupported message type")
 	}
-
-	ctxWithRequest := analyses.WithRequestID(ctx, msg.RequestID)
-	if err := processor.ProcessAnalysis(ctxWithRequest, msg.AnalysisID); err != nil {
-		return ErrProcess{AnalysisID: msg.AnalysisID, RequestID: msg.RequestID, Err: err}
-	}
-	return nil
 }

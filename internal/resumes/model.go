@@ -55,17 +55,18 @@ func validOriginType(originType string) bool {
 }
 
 type Resume struct {
-	ID               string
-	OwnerID          string
-	Title            string
-	Status           string
-	SourceResumeID   string
-	SourceVersionID  string
-	OriginType       string
-	CurrentVersionID string
-	CurrentResume    modelv1.ResumeModel
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                   string
+	OwnerID              string
+	Title                string
+	Status               string
+	SourceResumeID       string
+	SourceVersionID      string
+	OriginType           string
+	CurrentVersionID     string
+	CurrentResume        modelv1.ResumeModel
+	CurrentChangeSummary map[string]any
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type ResumeVersion struct {

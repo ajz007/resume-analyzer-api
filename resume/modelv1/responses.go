@@ -38,10 +38,11 @@ type ResponseWarning struct {
 // AI must not add unsupported skills silently.
 // AI must put unsupported JD requirements into MissingRequirements.
 type ResumeTailoringResponse struct {
-	TailoredResume      ResumeModel          `json:"tailoredResume"`
-	Changes             []TailoringChange    `json:"changes"`
-	MissingRequirements []MissingRequirement `json:"missingRequirements"`
-	Warnings            []ResponseWarning    `json:"warnings"`
+	TailoredResume      ResumeModel           `json:"tailoredResume"`
+	Changes             []TailoringChange     `json:"changes"`
+	MissingRequirements []MissingRequirement  `json:"missingRequirements"`
+	Suggestions         []TailoringSuggestion `json:"suggestions"`
+	Warnings            []ResponseWarning     `json:"warnings"`
 }
 
 type TailoringChange struct {
@@ -56,5 +57,21 @@ type TailoringChange struct {
 
 type MissingRequirement struct {
 	Requirement    string `json:"requirement"`
+	Message        string `json:"message"`
+	Example        string `json:"example"`
+	Risk           string `json:"risk"`
 	Recommendation string `json:"recommendation"`
+}
+
+type TailoringSuggestion struct {
+	Type        string `json:"type"`
+	Section     string `json:"section"`
+	ItemID      string `json:"itemId"`
+	Requirement string `json:"requirement"`
+	Message     string `json:"message"`
+	Example     string `json:"example"`
+	Before      string `json:"before"`
+	After       string `json:"after"`
+	Reason      string `json:"reason"`
+	Risk        string `json:"risk"`
 }
