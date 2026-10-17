@@ -1,5 +1,7 @@
 # Resume Analyzer API
 
+Deploys (tests, DB migrations, Lambda code) run from GitHub Actions on push to `main` after approval. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ```bash
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
 go build -o bootstrap ./cmd/lambda-http
