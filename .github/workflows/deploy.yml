@@ -1,0 +1,138 @@
+name: API CI / Deploy
+
+# Pull requests: vet + test.
+# Push to main (or manual run): test, then -- after approval on the "production"
+# environment -- run DB migrations and deploy both Lambdas.
+#
+# Setup (see DEPLOYMENT.md):
+#   Repository variables: AWS_REGION, AWS_ROLE_ARN, LAMBDA_HTTP_FUNCTION,
+#                         LAMBDA_WORKER_FUNCTION (optional), API_HEALTH_URL (optional)
+#   "production" environment secret: DATABASE_URL
+#   "production" environment protection: required reviewers
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_migrations:
+        description: Skip database migrations
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      LAMBDA_HTTP_FUNCTION: ${{ vars.LAMBDA_HTTP_FUNCTION }}
+      LAMBDA_WORKER_FUNCTION: ${{ vars.LAMBDA_WORKER_FUNCTION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check configuration
+        run: |
+          missing=0
+          for name in AWS_REGION LAMBDA_HTTP_FUNCTION; do
+            if [ -z "${!name}" ]; then echo "::error::Repository variable $name is not set"; missing=1; fi
+          done
+          if [ -z "${{ vars.AWS_ROLE_ARN }}" ]; then echo "::error::Repository variable AWS_ROLE_ARN is not set"; missing=1; fi
+          exit $missing
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Migrations run before the new code ships, so they must stay additive
+      # (new tables/columns) and compatible with the currently deployed code.
+      - name: Run database migrations
+        if: ${{ !inputs.skip_migrations }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ENV: production
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Environment secret DATABASE_URL is not set on the production environment"
+            exit 1
+          fi
+          go run ./cmd/migrate
+
+      - name: Deploy Lambda functions
+        run: |
+          set -euo pipefail
+
+          deploy() {
+            local fn="$1" pkg="$2"
+            # Build for whatever architecture the function is configured with.
+            local arch
+            arch=$(aws lambda get-function-configuration --function-name "$fn" \
+              --query 'Architectures[0]' --output text)
+            local goarch=amd64
+            if [ "$arch" = "arm64" ]; then goarch=arm64; fi
+
+            echo "Building $pkg for $fn ($arch)"
+            rm -rf "build/$fn" && mkdir -p "build/$fn"
+            GOOS=linux GOARCH="$goarch" CGO_ENABLED=0 \
+              go build -trimpath -ldflags="-s -w" -tags lambda.norpc \
+              -o "build/$fn/bootstrap" "$pkg"
+            (cd "build/$fn" && zip -q function.zip bootstrap)
+
+            aws lambda update-function-code --function-name "$fn" \
+              --zip-file "fileb://build/$fn/function.zip" --output text --query 'LastUpdateStatus'
+            aws lambda wait function-updated-v2 --function-name "$fn"
+            echo "Deployed $fn"
+          }
+
+          deploy "$LAMBDA_HTTP_FUNCTION" ./cmd/lambda-http
+          if [ -n "${LAMBDA_WORKER_FUNCTION:-}" ]; then
+            deploy "$LAMBDA_WORKER_FUNCTION" ./cmd/lambda-worker
+          else
+            echo "LAMBDA_WORKER_FUNCTION not set; skipping worker deploy"
+          fi
+
+      - name: Smoke test
+        if: ${{ vars.API_HEALTH_URL != '' }}
+        run: |
+          # The auth middleware rejects requests without an identity, so send a guest id.
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 -H "X-Guest-Id: github-deploy-smoke" "${{ vars.API_HEALTH_URL }}"; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "::error::Health check failed: ${{ vars.API_HEALTH_URL }}"
+          exit 1
