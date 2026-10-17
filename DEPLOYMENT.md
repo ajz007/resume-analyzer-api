@@ -119,10 +119,10 @@ Settings → Secrets and variables → Actions → **Variables**:
 | `AWS_ROLE_ARN` | ✓ | ✓ | `arn:aws:iam::<ACCOUNT_ID>:role/github-deploy-resume-analyzer` |
 | `LAMBDA_HTTP_FUNCTION` | ✓ | | HTTP Lambda name |
 | `LAMBDA_WORKER_FUNCTION` | ✓ (optional) | | worker Lambda name; leave unset to skip |
-| `API_HEALTH_URL` | ✓ (optional) | | `https://<api-domain>/api/v1/health` |
+| `API_HEALTH_URL` | ✓ (optional) | | `https://api.rethinkresume.com/api/v1/health` |
 | `UI_BUCKET` | | ✓ | `ra-prod-ui-us-east-1-ajz007` |
 | `CLOUDFRONT_DISTRIBUTION_ID` | | ✓ | `E1234ABCD...` |
-| `VITE_API_BASE_URL` | | ✓ | same value used for manual builds today |
+| `VITE_API_BASE_URL` | | ✓ | `https://api.rethinkresume.com/api/v1` |
 
 ### Secrets
 

@@ -129,8 +129,9 @@ jobs:
       - name: Smoke test
         if: ${{ vars.API_HEALTH_URL != '' }}
         run: |
+          # The auth middleware rejects requests without an identity, so send a guest id.
           for i in 1 2 3 4 5; do
-            if curl -fsS --max-time 10 "${{ vars.API_HEALTH_URL }}"; then echo; exit 0; fi
+            if curl -fsS --max-time 10 -H "X-Guest-Id: github-deploy-smoke" "${{ vars.API_HEALTH_URL }}"; then echo; exit 0; fi
             sleep 5
           done
           echo "::error::Health check failed: ${{ vars.API_HEALTH_URL }}"
