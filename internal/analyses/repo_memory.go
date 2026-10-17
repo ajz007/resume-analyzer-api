@@ -35,9 +35,20 @@ func (r *MemoryRepo) GetOrCreateForDocument(ctx context.Context, analysis Analys
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if analysis.Mode == "" {
+		analysis.Mode = ModeJobMatch
+	}
+
 	var latest *Analysis
 	for _, existing := range r.byUser[analysis.UserID] {
 		if existing.DocumentID != analysis.DocumentID {
+			continue
+		}
+		existingMode := existing.Mode
+		if existingMode == "" {
+			existingMode = ModeJobMatch
+		}
+		if existingMode != analysis.Mode || existing.JobDescription != analysis.JobDescription {
 			continue
 		}
 		if latest == nil || existing.CreatedAt.After(latest.CreatedAt) {
@@ -65,9 +76,6 @@ func (r *MemoryRepo) GetOrCreateForDocument(ctx context.Context, analysis Analys
 		}
 	}
 
-	if analysis.Mode == "" {
-		analysis.Mode = ModeJobMatch
-	}
 	r.byID[analysis.ID] = analysis
 	r.byUser[analysis.UserID] = append(r.byUser[analysis.UserID], analysis)
 	return analysis, true, nil

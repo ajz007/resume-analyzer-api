@@ -34,6 +34,11 @@ func Auth(env string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// Razorpay webhooks carry no user identity; the handler verifies their HMAC signature.
+		if c.Request.Method == http.MethodPost && path == "/api/v1/payments/webhook" {
+			c.Next()
+			return
+		}
 
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 

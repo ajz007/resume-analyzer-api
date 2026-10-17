@@ -54,7 +54,7 @@ If an analysis is `failed`, clients must set `retry=true` (query) or `X-Retry-An
 
 ## Idempotency rules
 
-`POST /api/v1/documents/:id/analyze` is idempotent per document:
+`POST /api/v1/documents/:id/analyze` is idempotent per document, mode (`ATS` / `JOB_MATCH`) and job description. A request with a different mode or job description creates a new analysis (and consumes quota):
 
 - If an analysis for the document is `queued` or `processing`, it is reused.
 - If an analysis is `completed`, the existing result is returned.

@@ -426,6 +426,11 @@ func normalizeFromV2_3(r AnalysisResultV2_3, analysis Analysis) NormalizedAnalys
 		MissingKeywords:  normalizeMissingKeywords(r.ATS.MissingKeywords),
 		FormattingIssues: ensureStringSlice(r.ATS.FormattingIssues),
 	}
+	if score, ok := CalculateATSReadinessScore(r.ATS.ScoreExplanation); ok {
+		ats.Score = score
+	} else {
+		meta.Limitations = append(meta.Limitations, "ats.score fell back to the model score because atsReadability/resumeStructure components were unavailable")
+	}
 	bullets := make([]NormalizedBulletRewrite, 0, len(r.BulletRewrites))
 	for _, br := range r.BulletRewrites {
 		bullets = append(bullets, NormalizedBulletRewrite{

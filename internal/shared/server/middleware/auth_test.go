@@ -58,3 +58,29 @@ func TestAuthDoesNotBypassOtherShareRoutes(t *testing.T) {
 		t.Fatalf("expected 401, got %d", resp.Code)
 	}
 }
+
+func TestAuthAllowsPaymentWebhookWithoutIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(Auth("dev"))
+	router.POST("/api/v1/payments/webhook", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	router.POST("/api/v1/payments/orders", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/payments/webhook", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected webhook to bypass auth, got %d", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/payments/orders", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected orders to require identity, got %d", resp.Code)
+	}
+}

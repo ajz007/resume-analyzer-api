@@ -35,6 +35,33 @@ func CalculateJobMatchScore(scoring JobMatchScoringV1) float64 {
 	return roundClampedScore(total / 100)
 }
 
+// atsReadinessComponentKeys are the scoreExplanation components that depend only on
+// the resume itself. JD-sensitive components (skillMatch, experienceRelevance) are
+// excluded so ATS Readiness stays stable across ATS and JOB_MATCH modes.
+var atsReadinessComponentKeys = map[string]bool{
+	"atsReadability":  true,
+	"resumeStructure": true,
+}
+
+// CalculateATSReadinessScore derives ats.score from the JD-independent components,
+// renormalizing their weights. ok is false when those components are unavailable.
+func CalculateATSReadinessScore(explanation ScoreExplanationV1) (score float64, ok bool) {
+	items := make([]WeightedScoreItem, 0, len(atsReadinessComponentKeys))
+	seen := make(map[string]bool, len(atsReadinessComponentKeys))
+	for _, c := range explanation.Components {
+		key := strings.TrimSpace(c.Key)
+		if !atsReadinessComponentKeys[key] || seen[key] || c.Weight <= 0 {
+			continue
+		}
+		seen[key] = true
+		items = append(items, WeightedScoreItem{Score: c.Score, Weight: c.Weight})
+	}
+	if len(seen) != len(atsReadinessComponentKeys) {
+		return 0, false
+	}
+	return CalculateWeightedScore(items), true
+}
+
 func CalculateAIScreeningScore(screening AIScreeningV1) float64 {
 	items := make([]WeightedScoreItem, 0, len(screening.ScoreBreakdown))
 	for _, item := range screening.ScoreBreakdown {

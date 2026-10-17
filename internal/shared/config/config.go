@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,14 @@ type Config struct {
 	UIRedirectURL      string
 	UIBaseURL          string
 	ShareTokenEncKey   string
+
+	// Razorpay one-time report unlocks.
+	PaywallEnabled        bool
+	RazorpayKeyID         string
+	RazorpayKeySecret     string
+	RazorpayWebhookSecret string
+	PriceINRPaise         int64
+	PriceUSDCents         int64
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -61,7 +70,40 @@ func Load() Config {
 		UIRedirectURL:      getEnv("UI_REDIRECT_URL", ""),
 		UIBaseURL:          getEnv("UI_BASE_URL", "https://rethinkresume.com"),
 		ShareTokenEncKey:   getEnv("SHARE_TOKEN_ENC_KEY", ""),
+
+		PaywallEnabled:        getBoolEnv("PAYWALL_ENABLED", false),
+		RazorpayKeyID:         getEnv("RAZORPAY_KEY_ID", ""),
+		RazorpayKeySecret:     getEnv("RAZORPAY_KEY_SECRET", ""),
+		RazorpayWebhookSecret: getEnv("RAZORPAY_WEBHOOK_SECRET", ""),
+		PriceINRPaise:         getInt64Env("PRICE_INR_PAISE", 49900),
+		PriceUSDCents:         getInt64Env("PRICE_USD_CENTS", 900),
 	}
+}
+
+func getBoolEnv(key string, def bool) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return def
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		log.Printf("invalid %s=%q, using %v", key, val, def)
+		return def
+	}
+	return parsed
+}
+
+func getInt64Env(key string, def int64) int64 {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return def
+	}
+	parsed, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || parsed < 0 {
+		log.Printf("invalid %s=%q, using %d", key, val, def)
+		return def
+	}
+	return parsed
 }
 
 func getEnv(key, def string) string {

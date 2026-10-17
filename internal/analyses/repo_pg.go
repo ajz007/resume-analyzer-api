@@ -26,7 +26,11 @@ func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, 
 		return Analysis{}, false, err
 	}
 
-	latest, err := getLatestForDocument(ctx, tx, analysis.UserID, analysis.DocumentID)
+	mode := analysis.Mode
+	if mode == "" {
+		mode = ModeJobMatch
+	}
+	latest, err := getLatestForDocument(ctx, tx, analysis.UserID, analysis.DocumentID, mode, analysis.JobDescription)
 	if err == nil {
 		switch latest.Status {
 		case StatusQueued, StatusProcessing:
@@ -672,13 +676,17 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	return err
 }
 
-func getLatestForDocument(ctx context.Context, q queryer, userID, documentID string) (Analysis, error) {
+// getLatestForDocument returns the latest analysis for a document that was run with the
+// same mode and job description, so a cached result is never reused across modes or JDs.
+func getLatestForDocument(ctx context.Context, q queryer, userID, documentID string, analysisMode AnalysisMode, jd string) (Analysis, error) {
 	const query = `
 SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
        job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model,
        error_code, error_message, error_retryable, started_at, completed_at, created_at, updated_at
 FROM analyses
 WHERE document_id = $1 AND user_id = $2 AND deleted_at IS NULL
+  AND COALESCE(NULLIF(mode, ''), 'JOB_MATCH') = $3
+  AND COALESCE(job_description, '') = $4
 ORDER BY created_at DESC
 LIMIT 1`
 
@@ -700,7 +708,7 @@ LIMIT 1`
 	var startedAt sql.NullTime
 	var completedAt sql.NullTime
 
-	err := q.QueryRowContext(ctx, query, documentID, userID).Scan(
+	err := q.QueryRowContext(ctx, query, documentID, userID, string(analysisMode), jd).Scan(
 		&a.ID,
 		&a.DocumentID,
 		&a.UserID,

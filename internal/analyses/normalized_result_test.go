@@ -184,8 +184,9 @@ func TestNormalizeFinalScoreATSModeUsesATSScore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got, ok := result["finalScore"].(float64); !ok || got != 74 {
-		t.Fatalf("expected finalScore 74, got %v", result["finalScore"])
+	// ats.score is recomputed from atsReadability (75 x 25) and resumeStructure (78 x 15).
+	if got, ok := result["finalScore"].(float64); !ok || got != 76 {
+		t.Fatalf("expected finalScore 76, got %v", result["finalScore"])
 	}
 	meta, ok := result["meta"].(map[string]any)
 	if !ok {
@@ -249,8 +250,9 @@ func TestNormalizeV2_4ATSModeUsesATSScoreAndZeroMatchScore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got, ok := result["finalScore"].(float64); !ok || got != 82 {
-		t.Fatalf("expected finalScore 82, got %v", result["finalScore"])
+	// ats.score is recomputed from the JD-independent scoreExplanation components.
+	if got, ok := result["finalScore"].(float64); !ok || got != 79 {
+		t.Fatalf("expected finalScore 79, got %v", result["finalScore"])
 	}
 	if got, ok := result["matchScore"].(float64); !ok || got != 0 {
 		t.Fatalf("expected matchScore 0, got %v", result["matchScore"])

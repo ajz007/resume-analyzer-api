@@ -51,6 +51,9 @@ Important for async resume generation:
 - migration `0023_resume_generation_error_type.sql` adds the `error_type` field used for operator diagnostics
 - if it is missing, the API can fail before enqueue with a database error
 
+Important for paid report unlocks:
+- migration `0024_payments.sql` (`payments`, `report_unlocks`) must be applied before setting `PAYWALL_ENABLED=true`
+
 Quick verification:
 
 ```sql

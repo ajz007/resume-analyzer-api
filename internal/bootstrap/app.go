@@ -21,6 +21,7 @@ import (
 	"resume-backend/internal/generatedresumes"
 	"resume-backend/internal/llm"
 	openai "resume-backend/internal/llm/openai"
+	"resume-backend/internal/payments"
 	"resume-backend/internal/queue"
 	"resume-backend/internal/resumes"
 	"resume-backend/internal/shared/config"
@@ -69,6 +70,8 @@ type App struct {
 	ApplyHandler              *applies.Handler
 	AccountHandler            *account.Handler
 	UsageHandler              *usage.Handler
+	PaymentsService           *payments.Service
+	PaymentsHandler           *payments.Handler
 	ResumesHandler            *resumes.Handler
 	UsersHandler              *users.Handler
 	GoogleAuth                *googleauth.GoogleService
@@ -137,6 +140,7 @@ func Build(cfg config.Config) (*App, error) {
 		ApplyHandler:    app.ApplyHandler,
 		DocumentHandler: app.DocumentsHandler,
 		UsageHandler:    app.UsageHandler,
+		PaymentsHandler: app.PaymentsHandler,
 		ResumesHandler:  app.ResumesHandler,
 		UserHandler:     app.UsersHandler,
 		GoogleAuth:      app.GoogleAuth,
@@ -354,7 +358,10 @@ func buildServices(app *App) error {
 	app.AccountService = account.NewService(docRepo, analysisRepo)
 	app.UsersService = userSvc
 	app.DocumentsHandler = documents.NewHandler(docSvc)
+	app.PaymentsService = buildPaymentsService(app.Config, app.DB, analysisRepo)
+	app.PaymentsHandler = payments.NewHandler(app.PaymentsService)
 	app.AnalysisHandler = analyses.NewHandler(analysisSvc, docRepo)
+	app.AnalysisHandler.Unlocks = app.PaymentsService
 	app.ApplyHandler = applies.NewHandler(applySvc, generatedResumeRepo, app.Store)
 	app.AccountHandler = account.NewHandler(app.AccountService)
 	app.UsageHandler = usageHandler
@@ -371,6 +378,48 @@ func buildServices(app *App) error {
 
 type analysisAdapter struct {
 	repo analyses.Repo
+}
+
+// buildPaymentsService wires Razorpay unlocks. The paywall only turns on when
+// PAYWALL_ENABLED is set and all Razorpay credentials are present, so a missing
+// secret never locks reports without a way to pay.
+func buildPaymentsService(cfg config.Config, sqlDB *sql.DB, analysisRepo analyses.Repo) *payments.Service {
+	var repo payments.Repo = payments.NewMemoryRepo()
+	if sqlDB != nil {
+		repo = &payments.PGRepo{DB: sqlDB}
+	}
+	svc := &payments.Service{
+		Repo:          repo,
+		Analyses:      analysisAdapter{repo: analysisRepo},
+		KeyID:         strings.TrimSpace(cfg.RazorpayKeyID),
+		KeySecret:     strings.TrimSpace(cfg.RazorpayKeySecret),
+		WebhookSecret: strings.TrimSpace(cfg.RazorpayWebhookSecret),
+		Prices: map[string]int64{
+			payments.CurrencyINR: cfg.PriceINRPaise,
+			payments.CurrencyUSD: cfg.PriceUSDCents,
+		},
+	}
+	if !cfg.PaywallEnabled {
+		return svc
+	}
+	if svc.KeyID == "" || svc.KeySecret == "" || svc.WebhookSecret == "" {
+		log.Printf("PAYWALL_ENABLED is set but Razorpay credentials are incomplete; paywall disabled")
+		return svc
+	}
+	svc.Orders = payments.NewRazorpayClient(svc.KeyID, svc.KeySecret)
+	svc.Enabled = true
+	return svc
+}
+
+func (a analysisAdapter) GetAnalysisInfo(ctx context.Context, analysisID string) (payments.AnalysisInfo, error) {
+	analysis, err := a.repo.GetByID(ctx, analysisID)
+	if err != nil {
+		if errors.Is(err, analyses.ErrNotFound) {
+			return payments.AnalysisInfo{}, payments.ErrAnalysisNotFound
+		}
+		return payments.AnalysisInfo{}, err
+	}
+	return payments.AnalysisInfo{ID: analysis.ID, UserID: analysis.UserID, Status: analysis.Status}, nil
 }
 
 func (a analysisAdapter) GetByID(ctx context.Context, analysisID string) (usage.AnalysisRecord, error) {

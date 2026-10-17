@@ -159,3 +159,41 @@ func TestBuildFixThisFirstSortingAndMax3(t *testing.T) {
 		t.Fatalf("expected high impact and medium effort, got impact=%s effort=%s", got[0].ExpectedImpact, got[0].Effort)
 	}
 }
+
+func atsExplanation(readability, skill, experience, structure float64) ScoreExplanationV1 {
+	return ScoreExplanationV1{Components: []ScoreComponentV1{
+		{Key: "atsReadability", Score: readability, Weight: 25},
+		{Key: "skillMatch", Score: skill, Weight: 30},
+		{Key: "experienceRelevance", Score: experience, Weight: 30},
+		{Key: "resumeStructure", Score: structure, Weight: 15},
+	}}
+}
+
+func TestCalculateATSReadinessScoreUsesOnlyJDIndependentComponents(t *testing.T) {
+	got, ok := CalculateATSReadinessScore(atsExplanation(80, 40, 40, 72))
+	if !ok {
+		t.Fatalf("expected ATS readiness score to be computed")
+	}
+	// (80*25 + 72*15) / 40 = 77
+	if got != 77 {
+		t.Fatalf("expected ATS readiness 77, got %.0f", got)
+	}
+}
+
+func TestCalculateATSReadinessScoreIgnoresJDSensitiveChanges(t *testing.T) {
+	noJD, _ := CalculateATSReadinessScore(atsExplanation(80, 50, 55, 72))
+	withJD, _ := CalculateATSReadinessScore(atsExplanation(80, 90, 85, 72))
+	if noJD != withJD {
+		t.Fatalf("expected skillMatch/experienceRelevance not to affect ATS readiness, got %.0f vs %.0f", noJD, withJD)
+	}
+}
+
+func TestCalculateATSReadinessScoreMissingComponents(t *testing.T) {
+	if _, ok := CalculateATSReadinessScore(ScoreExplanationV1{}); ok {
+		t.Fatalf("expected ok=false for empty explanation")
+	}
+	partial := ScoreExplanationV1{Components: []ScoreComponentV1{{Key: "atsReadability", Score: 80, Weight: 25}}}
+	if _, ok := CalculateATSReadinessScore(partial); ok {
+		t.Fatalf("expected ok=false when resumeStructure is missing")
+	}
+}
