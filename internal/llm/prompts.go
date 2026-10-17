@@ -15,11 +15,15 @@ var (
 	promptV2_3 string
 	//go:embed prompts/v2_4.txt
 	promptV2_4 string
+	//go:embed prompts/v2_5.txt
+	promptV2_5 string
 )
 
 // PromptTemplate returns the prompt template text and whether the version was recognized.
 func PromptTemplate(version string) (string, bool) {
 	switch version {
+	case "v2_5":
+		return promptV2_5, true
 	case "v2_4":
 		return promptV2_4, true
 	case "v2_3":

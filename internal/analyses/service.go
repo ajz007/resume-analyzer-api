@@ -407,10 +407,10 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 			return err
 		}
-	} else if analysis.PromptVersion == "v2_4" {
+	} else if usesV2_4Schema(analysis.PromptVersion) {
 		raw, err = ValidateV2_4WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
-			err = fmt.Errorf("llm validate v2_4: %w", err)
+			err = fmt.Errorf("llm validate %s: %w", analysis.PromptVersion, err)
 			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 			return err
 		}

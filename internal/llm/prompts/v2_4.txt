@@ -186,7 +186,6 @@ Existing v2_3 validation rules still apply:
 - ats.scoreReasoning must contain 3-6 short items and align with scoreBreakdown.
 - scoreExplanation must contain exactly these keys: atsReadability, skillMatch, experienceRelevance, resumeStructure.
 - scoreExplanation component weights must total exactly 100.
-- Score atsReadability and resumeStructure from the resume alone (parsing, formatting, section structure). Do not let the job description influence these two components; the same resume must get the same atsReadability and resumeStructure scores with or without a job description.
 - evidence snippets for issues and bullet rewrites must be short and directly supported by resume text, or "notFound".
 
 Job requirement rules:

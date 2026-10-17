@@ -25,3 +25,14 @@ func TestPromptTemplateUnknownFallsBackToV1(t *testing.T) {
 		t.Fatalf("expected unknown prompt version to fall back to v1")
 	}
 }
+
+func TestPromptTemplateV2_5Recognized(t *testing.T) {
+	template, recognized := PromptTemplate("v2_5")
+	if !recognized {
+		t.Fatalf("expected v2_5 to be recognized")
+	}
+	v24, _ := PromptTemplate("v2_4")
+	if template == "" || template == v24 {
+		t.Fatalf("expected v2_5 prompt template to be non-empty and distinct from v2_4")
+	}
+}
