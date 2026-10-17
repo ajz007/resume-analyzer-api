@@ -28,9 +28,16 @@ func NormalizePromptVersion(raw string) string {
 
 func isValidPromptVersion(version string) bool {
 	switch strings.TrimSpace(version) {
-	case "v1", "v2", "v2_1", "v2_2", "v2_3", "v2_4":
+	case "v1", "v2", "v2_1", "v2_2", "v2_3", "v2_4", "v2_5":
 		return true
 	default:
 		return false
 	}
+}
+
+// usesV2_4Schema reports whether a prompt version produces the v2_4 output schema.
+// v2_5 changes only prompt instructions, not the output shape.
+func usesV2_4Schema(version string) bool {
+	v := strings.TrimSpace(version)
+	return strings.EqualFold(v, "v2_4") || strings.EqualFold(v, "v2_5")
 }
