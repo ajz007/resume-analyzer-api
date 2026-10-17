@@ -345,12 +345,13 @@ func TestStartAnalysisCompletedReturnsResult(t *testing.T) {
 		"finalScore": 74.0,
 	}
 	analysis := Analysis{
-		ID:         "analysis-completed",
-		DocumentID: documentID,
-		UserID:     userID,
-		Status:     StatusCompleted,
-		Result:     result,
-		CreatedAt:  time.Now().UTC(),
+		ID:             "analysis-completed",
+		JobDescription: strings.Repeat("a", 300),
+		DocumentID:     documentID,
+		UserID:         userID,
+		Status:         StatusCompleted,
+		Result:         result,
+		CreatedAt:      time.Now().UTC(),
 	}
 	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
 		t.Fatalf("create analysis: %v", err)
@@ -411,12 +412,13 @@ func TestStartAnalysisFailedRequiresRetry(t *testing.T) {
 
 	msg := "boom"
 	analysis := Analysis{
-		ID:           "analysis-failed",
-		DocumentID:   documentID,
-		UserID:       userID,
-		Status:       StatusFailed,
-		ErrorMessage: &msg,
-		CreatedAt:    time.Now().UTC(),
+		ID:             "analysis-failed",
+		JobDescription: strings.Repeat("a", 300),
+		DocumentID:     documentID,
+		UserID:         userID,
+		Status:         StatusFailed,
+		ErrorMessage:   &msg,
+		CreatedAt:      time.Now().UTC(),
 	}
 	if err := analysisRepo.Create(context.Background(), analysis); err != nil {
 		t.Fatalf("create analysis: %v", err)

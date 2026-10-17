@@ -22,6 +22,8 @@ import (
 type Handler struct {
 	Svc     *Service
 	DocRepo documents.DocumentsRepo
+	// Unlocks gates full reports behind a payment. Nil means no paywall.
+	Unlocks UnlockChecker
 }
 
 // NewHandler constructs a Handler.
@@ -225,7 +227,14 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 		}
 	}
 	if analysis.Status == StatusCompleted && analysis.Result != nil {
-		resp["result"] = analysis.Result
+		result, locked, sections, err := h.applyPaywall(c.Request.Context(), analysis.UserID, analysis.ID, analysis.Result)
+		if err != nil {
+			respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to fetch analysis", err)
+			return
+		}
+		resp["result"] = result
+		resp["locked"] = locked
+		resp["lockedSections"] = sections
 	}
 	if analysis.Status == StatusQueued || analysis.Status == StatusProcessing {
 		resp["pollAfterMs"] = defaultPollAfterMs
@@ -480,11 +489,18 @@ func (h *Handler) getSharedAnalysis(c *gin.Context) {
 		return
 	}
 
+	result, locked, sections, err := h.applyPaywall(c.Request.Context(), analysis.UserID, analysis.ID, analysis.Result)
+	if err != nil {
+		respond.Error(c, http.StatusInternalServerError, "internal_error", "failed to fetch shared analysis", err)
+		return
+	}
 	resp := gin.H{
-		"id":     analysis.ID,
-		"mode":   analysis.Mode,
-		"status": analysis.Status,
-		"result": analysis.Result,
+		"id":             analysis.ID,
+		"mode":           analysis.Mode,
+		"status":         analysis.Status,
+		"result":         result,
+		"locked":         locked,
+		"lockedSections": sections,
 	}
 	if analysis.StartedAt != nil {
 		resp["startedAt"] = analysis.StartedAt

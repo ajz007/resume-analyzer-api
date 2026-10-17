@@ -47,8 +47,9 @@ func TestNormalizeToFinalV2_4ATSGolden(t *testing.T) {
 		t.Fatalf("normalize v2_4 ats: %v", err)
 	}
 
-	if out.FinalScore != 82 {
-		t.Fatalf("expected finalScore 82, got %.0f", out.FinalScore)
+	// ats.score is recomputed from atsReadability (82 x 25) and resumeStructure (84 x 15).
+	if out.FinalScore != 83 {
+		t.Fatalf("expected finalScore 83, got %.0f", out.FinalScore)
 	}
 	if out.MatchScore != 0 {
 		t.Fatalf("expected matchScore 0, got %.0f", out.MatchScore)
