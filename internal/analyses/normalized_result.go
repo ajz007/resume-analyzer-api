@@ -56,7 +56,7 @@ func (r NormalizedAnalysisResult) MarshalJSON() ([]byte, error) {
 		MissingInformation: r.MissingInformation,
 		ActionPlan:         r.ActionPlan,
 	}
-	if strings.EqualFold(r.Meta.PromptVersion, "v2_4") {
+	if usesV2_4Schema(r.Meta.PromptVersion) {
 		out.JobRequirementProfile = &r.JobRequirementProfile
 		out.JobMatchScoring = &r.JobMatchScoring
 		out.AIScreening = &r.AIScreening
@@ -127,7 +127,7 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 	}
 
 	switch {
-	case hasMeta && strings.EqualFold(envelope.Meta.PromptVersion, "v2_4"):
+	case hasMeta && usesV2_4Schema(envelope.Meta.PromptVersion):
 		var parsed AnalysisResultV2_4
 		if err := json.Unmarshal(raw, &parsed); err != nil {
 			return NormalizedAnalysisResult{}, err

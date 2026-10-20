@@ -55,6 +55,7 @@ Important for async resume generation:
 
 Important for paid report unlocks:
 - migration `0024_payments.sql` (`payments`, `report_unlocks`) must be applied before setting `PAYWALL_ENABLED=true`
+- go-live steps for paid unlocks (prompt version, score-consistency run, Razorpay setup): see [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md)
 
 Quick verification:
 
