@@ -28,7 +28,7 @@ func NormalizePromptVersion(raw string) string {
 
 func isValidPromptVersion(version string) bool {
 	switch strings.TrimSpace(version) {
-	case "v1", "v2", "v2_1", "v2_2", "v2_3", "v2_4", "v2_5":
+	case "v3", "v1", "v2", "v2_1", "v2_2", "v2_3", "v2_4", "v2_5":
 		return true
 	default:
 		return false

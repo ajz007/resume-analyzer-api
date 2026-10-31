@@ -35,7 +35,8 @@ func BuildPrompt(promptVersion string, resumeText string, jobDescription string,
 	}
 }
 
-func buildFixPrompt(promptVersion string, jobDescription string, model string, raw []byte) []Message {
+// BuildFixPrompt creates the chat messages for repairing invalid analysis JSON.
+func BuildFixPrompt(promptVersion string, jobDescription string, model string, raw []byte) []Message {
 	_, developer := resolvePromptTemplate(promptVersion, jobDescription, model)
 	return []Message{
 		{Role: "system", Content: systemPromptFixJSON},

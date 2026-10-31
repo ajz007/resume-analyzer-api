@@ -108,6 +108,13 @@ func ParseMessage(body string) (queue.Message, MessageMeta, error) {
 		if strings.TrimSpace(msg.AnalysisID) == "" {
 			return msg, meta, ErrMissingAnalysisID{Meta: meta, RequestID: msg.RequestID}
 		}
+	case queue.MessageTypeReviewAnswer:
+		if strings.TrimSpace(msg.AnalysisID) == "" {
+			return msg, meta, ErrMissingAnalysisID{Meta: meta, RequestID: msg.RequestID}
+		}
+		if strings.TrimSpace(msg.JobID) == "" {
+			return msg, meta, ErrMissingJobID{Meta: meta, RequestID: msg.RequestID}
+		}
 	case queue.MessageTypeResumeGeneration:
 		if strings.TrimSpace(msg.JobID) == "" {
 			return msg, meta, ErrMissingJobID{Meta: meta, RequestID: msg.RequestID}
@@ -163,6 +170,21 @@ func HandleMessage(ctx context.Context, app *bootstrap.App, body string) error {
 		ctxWithRequest := analyses.WithRequestID(ctx, msg.RequestID)
 		if err := processor.ProcessAnalysis(ctxWithRequest, msg.AnalysisID); err != nil {
 			return ErrProcess{Type: queue.MessageTypeAnalysis, AnalysisID: msg.AnalysisID, RequestID: msg.RequestID, Err: err}
+		}
+		return nil
+	case queue.MessageTypeReviewAnswer:
+		if strings.TrimSpace(msg.AnalysisID) == "" {
+			return ErrMissingAnalysisID{Meta: ComputeMeta(body), RequestID: msg.RequestID}
+		}
+		if strings.TrimSpace(msg.JobID) == "" {
+			return ErrMissingJobID{Meta: ComputeMeta(body), RequestID: msg.RequestID}
+		}
+		if app.AnalysesService == nil {
+			return errors.New("review answer service not configured")
+		}
+		ctxWithRequest := analyses.WithRequestID(ctx, msg.RequestID)
+		if err := app.AnalysesService.ProcessReviewAnswer(ctxWithRequest, msg.AnalysisID, msg.JobID); err != nil {
+			return ErrProcess{Type: queue.MessageTypeReviewAnswer, AnalysisID: msg.AnalysisID, JobID: msg.JobID, RequestID: msg.RequestID, Err: err}
 		}
 		return nil
 	case queue.MessageTypeResumeGeneration:

@@ -60,7 +60,7 @@ func (c *PromptClient) Complete(ctx context.Context, prompt string) (string, err
 			Type: "json_object",
 		},
 	}
-	if !isGPT5(c.model) {
+	if !rejectsTemperature(c.model) {
 		reqBody.Temperature = &temp
 	}
 

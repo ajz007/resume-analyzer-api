@@ -13,10 +13,12 @@ type Client interface {
 
 // AnalyzeInput captures the inputs needed for resume analysis.
 type AnalyzeInput struct {
-	ResumeText     string
-	JobDescription string
-	PromptVersion  string
-	TargetRole     string
+	ResumeText          string
+	JobDescription      string
+	PromptVersion       string
+	TargetRole          string
+	MaxCompletionTokens int
+	ResponseSchema      json.RawMessage // Optional strict provider schema, supplied by the analysis service.
 }
 
 type fixJSONKey struct{}
@@ -70,4 +72,14 @@ func (PlaceholderClient) AnalyzeResume(ctx context.Context, input AnalyzeInput) 
 	_ = ctx
 	_ = input
 	return nil, ErrNotImplemented
+}
+
+// ReviewRevisionClient is optional so analysis-only providers fail closed for answers.
+type ReviewRevisionInput struct {
+	SystemPrompt   string
+	Payload        string
+	ResponseSchema json.RawMessage
+}
+type ReviewRevisionClient interface {
+	ReviseReview(context.Context, ReviewRevisionInput) (json.RawMessage, error)
 }

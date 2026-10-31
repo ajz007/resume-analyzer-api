@@ -31,6 +31,9 @@ func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, 
 		mode = ModeJobMatch
 	}
 	latest, err := getLatestForDocument(ctx, tx, analysis.UserID, analysis.DocumentID, mode, analysis.JobDescription)
+	if err == nil && !compatibleAnalysis(latest, analysis) {
+		err = sql.ErrNoRows
+	}
 	if err == nil {
 		switch latest.Status {
 		case StatusQueued, StatusProcessing:

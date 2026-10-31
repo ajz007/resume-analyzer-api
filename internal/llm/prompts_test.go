@@ -36,3 +36,10 @@ func TestPromptTemplateV2_5Recognized(t *testing.T) {
 		t.Fatalf("expected v2_5 prompt template to be non-empty and distinct from v2_4")
 	}
 }
+
+func TestPromptTemplateV3Recognized(t *testing.T) {
+	template, ok := PromptTemplate("v3")
+	if !ok || template == "" {
+		t.Fatal("V3 prompt missing")
+	}
+}

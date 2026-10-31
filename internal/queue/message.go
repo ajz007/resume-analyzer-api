@@ -4,6 +4,7 @@ import "encoding/json"
 
 const (
 	MessageTypeAnalysis         = "analysis"
+	MessageTypeReviewAnswer     = "review_answer"
 	MessageTypeResumeGeneration = "resume_generation"
 )
 
