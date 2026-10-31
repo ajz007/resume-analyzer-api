@@ -33,6 +33,7 @@ import (
 	s3store "resume-backend/internal/shared/storage/object/s3"
 	"resume-backend/internal/usage"
 	"resume-backend/internal/users"
+	"resume-backend/internal/workspace"
 )
 
 const (
@@ -42,6 +43,7 @@ const (
 
 // App holds shared dependencies. Router is intentionally left nil for now.
 type App struct {
+	WorkspaceHandler          *workspace.Handler
 	Config                    config.Config
 	Router                    *gin.Engine
 	DB                        *sql.DB
@@ -134,16 +136,17 @@ func Build(cfg config.Config) (*App, error) {
 	}
 
 	app.Router = server.NewRouter(server.RouterDeps{
-		Config:          app.Config,
-		AccountHandler:  app.AccountHandler,
-		AnalysisHandler: app.AnalysisHandler,
-		ApplyHandler:    app.ApplyHandler,
-		DocumentHandler: app.DocumentsHandler,
-		UsageHandler:    app.UsageHandler,
-		PaymentsHandler: app.PaymentsHandler,
-		ResumesHandler:  app.ResumesHandler,
-		UserHandler:     app.UsersHandler,
-		GoogleAuth:      app.GoogleAuth,
+		Config:           app.Config,
+		WorkspaceHandler: app.WorkspaceHandler,
+		AccountHandler:   app.AccountHandler,
+		AnalysisHandler:  app.AnalysisHandler,
+		ApplyHandler:     app.ApplyHandler,
+		DocumentHandler:  app.DocumentsHandler,
+		UsageHandler:     app.UsageHandler,
+		PaymentsHandler:  app.PaymentsHandler,
+		ResumesHandler:   app.ResumesHandler,
+		UserHandler:      app.UsersHandler,
+		GoogleAuth:       app.GoogleAuth,
 	})
 
 	return app, nil
@@ -362,6 +365,54 @@ func buildServices(app *App) error {
 	app.AccountService = account.NewService(docRepo, analysisRepo)
 	app.UsersService = userSvc
 	app.DocumentsHandler = documents.NewHandler(docSvc)
+
+	var workspaceStore workspace.Store
+	if app.DB != nil {
+		workspaceStore = &workspace.PGStore{DB: app.DB}
+	} else {
+		memory := workspace.NewMemoryStore()
+		memory.Sources = func(ctx context.Context, user string) ([]workspace.Application, error) {
+			items, err := analysisRepo.ListByUser(ctx, user, 0, 0)
+			if err != nil {
+				return nil, err
+			}
+			out := []workspace.Application{}
+			for _, a := range items {
+				d, err := docRepo.GetByID(ctx, user, a.DocumentID)
+				file := ""
+				if err == nil {
+					file = d.FileName
+				}
+				excerpt := []rune(a.JobDescription)
+				if len(excerpt) > 240 {
+					excerpt = excerpt[:240]
+				}
+				out = append(out, workspace.Application{AnalysisID: a.ID, DocumentID: a.DocumentID, ResumeFileName: file, JobExcerpt: string(excerpt), Mode: string(a.Mode), Status: a.Status, CreatedAt: a.CreatedAt})
+			}
+			return out, nil
+		}
+		workspaceStore = memory
+	}
+	app.WorkspaceHandler = &workspace.Handler{Store: workspaceStore, Documents: docRepo, Application: func(ctx context.Context, id string) (workspace.Application, string, error) {
+		a, err := analysisRepo.GetByID(ctx, id)
+		if errors.Is(err, analyses.ErrNotFound) {
+			err = workspace.ErrNotFound
+		}
+		if err != nil {
+			return workspace.Application{}, "", err
+		}
+		d, err := docRepo.GetByID(ctx, a.UserID, a.DocumentID)
+		file := ""
+		if err == nil {
+			file = d.FileName
+		}
+		excerpt := []rune(a.JobDescription)
+		if len(excerpt) > 240 {
+			excerpt = excerpt[:240]
+		}
+		return workspace.Application{AnalysisID: a.ID, DocumentID: a.DocumentID, ResumeFileName: file, JobExcerpt: string(excerpt), Mode: string(a.Mode), Status: a.Status, CreatedAt: a.CreatedAt}, a.UserID, nil
+	}}
+
 	app.PaymentsService = buildPaymentsService(app.Config, app.DB, analysisRepo)
 	app.PaymentsHandler = payments.NewHandler(app.PaymentsService)
 	app.AnalysisHandler = analyses.NewHandler(analysisSvc, docRepo)
