@@ -383,7 +383,17 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 	ctxWithHash = withValidationTelemetryAnalysisID(ctxWithHash, analysisID)
 
 	var raw json.RawMessage
-	if analysis.PromptVersion == "v2" {
+	if analysis.PromptVersion == "v3" {
+		raw, err = ValidateV3WithRetry(ctxWithHash, llmClient, input)
+		if err != nil {
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
+		}
+		if err = s.storeAnalysisRaw(ctx, analysisID, raw); err != nil {
+			s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
+			return err
+		}
+	} else if analysis.PromptVersion == "v2" {
 		raw, err = ValidateV2WithRetry(ctxWithHash, llmClient, input)
 		if err != nil {
 			err = fmt.Errorf("llm validate v2: %w", err)

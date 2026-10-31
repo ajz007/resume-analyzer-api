@@ -1,0 +1,1950 @@
+[
+  {
+    "id": "trading-failover",
+    "source": "Example Engineer\nExample employer\nImplemented automated failover, significantly reducing downtime.\nA separate initiative reduced costs by 20%.\nEducation: Example University.",
+    "result": {
+      "meta": {
+        "promptVersion": "v3",
+        "model": "gpt-6.1-sol",
+        "jobDescriptionProvided": true,
+        "confidence": 0.8,
+        "assumptions": [],
+        "limitations": [],
+        "mode": "JOB_MATCH",
+        "primaryScoreType": "JOB_MATCH"
+      },
+      "summary": {
+        "overallAssessment": "Relevant implementation evidence; the remaining requirements need careful review.",
+        "strengths": [
+          "Concrete implementation work."
+        ],
+        "weaknesses": [
+          "Recovery validation remains unclear."
+        ]
+      },
+      "ats": {
+        "score": 82,
+        "scoreBreakdown": {
+          "skills": 25,
+          "experience": 25,
+          "impact": 20,
+          "formatting": 15,
+          "roleFit": 15
+        },
+        "scoreReasoning": [
+          "Core backend skills are clear.",
+          "Experience aligns with the target role.",
+          "Impact is present but can be sharper."
+        ],
+        "scoreExplanation": {
+          "components": [
+            {
+              "key": "atsReadability",
+              "label": "ATS Readability",
+              "score": 80,
+              "weight": 25,
+              "explanation": "Clear headings and parseable structure.",
+              "helped": [
+                "Standard section titles"
+              ],
+              "dragged": [
+                "Dense bullets"
+              ]
+            },
+            {
+              "key": "skillMatch",
+              "label": "Skill Match",
+              "score": 85,
+              "weight": 30,
+              "explanation": "Backend skills match the role.",
+              "helped": [
+                "Go",
+                "AWS"
+              ],
+              "dragged": [
+                "Few queueing details"
+              ]
+            },
+            {
+              "key": "experienceRelevance",
+              "label": "Experience Relevance",
+              "score": 82,
+              "weight": 30,
+              "explanation": "Recent experience fits the job.",
+              "helped": [
+                "API ownership"
+              ],
+              "dragged": [
+                "Limited system scale evidence"
+              ]
+            },
+            {
+              "key": "resumeStructure",
+              "label": "Resume Structure",
+              "score": 78,
+              "weight": 15,
+              "explanation": "Sections are easy to scan.",
+              "helped": [
+                "Concise layout"
+              ],
+              "dragged": [
+                "Some bullets lack metrics"
+              ]
+            }
+          ]
+        },
+        "missingKeywords": {
+          "fromJobDescription": [],
+          "industryCommon": []
+        },
+        "formattingIssues": []
+      },
+      "issues": [],
+      "bulletRewrites": [],
+      "missingInformation": [],
+      "actionPlan": {
+        "quickWins": [],
+        "mediumEffort": [],
+        "deepFixes": []
+      },
+      "jobRequirementProfile": {
+        "isApplicable": true,
+        "primaryRole": "Engineer",
+        "seniority": "SENIOR",
+        "roleType": "BACKEND",
+        "recruiterIntentSummary": "Demonstrate implementation, delivery discipline and operational responsibility.",
+        "topPriorities": [
+          {
+            "id": "implementation",
+            "priority": "Hands-on implementation",
+            "importance": "HIGH",
+            "weight": 50,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "delivery",
+            "priority": "Delivery and validation",
+            "importance": "HIGH",
+            "weight": 30,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "operations",
+            "priority": "Operational responsibility",
+            "importance": "HIGH",
+            "weight": 20,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          }
+        ],
+        "hiddenExpectations": [],
+        "niceToHaveSignals": []
+      },
+      "jobMatchScoring": {
+        "score": 63,
+        "scoringStrategy": "JD_WEIGHTED",
+        "requirementScores": [
+          {
+            "requirementId": "implementation",
+            "requirement": "Hands-on implementation",
+            "weight": 50,
+            "score": 70,
+            "weightedContribution": 35.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "Implemented automated failover, significantly reducing downtime.",
+            "gap": "Recovery validation remains unclear."
+          },
+          {
+            "requirementId": "delivery",
+            "requirement": "Delivery and validation",
+            "weight": 30,
+            "score": 60,
+            "weightedContribution": 18.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "Recovery validation remains unclear."
+          },
+          {
+            "requirementId": "operations",
+            "requirement": "Operational responsibility",
+            "weight": 20,
+            "score": 50,
+            "weightedContribution": 10.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "Recovery validation remains unclear."
+          }
+        ],
+        "explanation": "Illustrative fixture rubric; not a generated candidate assessment."
+      },
+      "aiScreening": {
+        "score": 70,
+        "verdict": {
+          "tier": "GOOD",
+          "title": "Relevant evidence, with scope to clarify",
+          "summary": "Source implementation is visible; broader responsibility needs confirmation.",
+          "screeningRisk": "LOW"
+        },
+        "scoreBreakdown": [
+          {
+            "id": "semantic_relevance",
+            "label": "Semantic Relevance",
+            "score": 70,
+            "weight": 25,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "role_intent_alignment",
+            "label": "Role Intent Alignment",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "evidence_strength",
+            "label": "Evidence Strength",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "impact_strength",
+            "label": "Impact Strength",
+            "score": 70,
+            "weight": 15,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "signal_density",
+            "label": "Signal Density",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "clarity_specificity",
+            "label": "Clarity Specificity",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          }
+        ],
+        "aiRecruiterVerdict": {
+          "oneLineVerdict": "Relevant implementation evidence; the remaining requirements need careful review.",
+          "mainConcern": "Recovery validation remains unclear.",
+          "strongestSignal": "The resume describes specific implementation work.",
+          "weakestSignal": "Broader responsibility and validation are unclear."
+        }
+      },
+      "fixThisFirst": [],
+      "report": {
+        "schemaVersion": "3",
+        "scope": "SELECTED_PASSAGES",
+        "priorities": [
+          {
+            "title": "Make the existing implementation clearer",
+            "reason": "Use source-supported work rather than adding claims.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "edits": [
+          {
+            "id": "implementation",
+            "operation": "replace",
+            "section": "Example employer \u2014 implementation",
+            "before": "Implemented automated failover, significantly reducing downtime.",
+            "after": "Implemented automated failover, reducing downtime.",
+            "insertAfter": "",
+            "reason": "Preserve actual scope and clarify the existing evidence.",
+            "sourceQuotes": [
+              "Implemented automated failover, significantly reducing downtime."
+            ],
+            "requirementIds": []
+          }
+        ],
+        "sections": [
+          {
+            "heading": "Example employer",
+            "editIds": [
+              "implementation"
+            ],
+            "retained": [
+              {
+                "text": "A separate initiative reduced costs by 20%.",
+                "sourceQuote": "A separate initiative reduced costs by 20%."
+              }
+            ]
+          }
+        ],
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Which implementation decision did you personally make, and how did you validate it?",
+            "why": "Concrete scope could strengthen the evidence without inventing a metric.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "outcomes": {
+          "clearerNow": [
+            "Existing implementation work."
+          ],
+          "needsConfirmation": [
+            "Personal scope and validation."
+          ],
+          "stillUnresolved": [
+            "Recovery validation remains unclear."
+          ]
+        },
+        "cleanup": [],
+        "interviewPreparation": [
+          "Explain the implementation and its validation."
+        ],
+        "coverage": [
+          {
+            "sourceQuote": "Implemented automated failover, significantly reducing downtime.",
+            "disposition": "rewritten",
+            "reason": "Used in the selected passages."
+          },
+          {
+            "sourceQuote": "A separate initiative reduced costs by 20%.",
+            "disposition": "retained",
+            "reason": "Keep the unique outcome separate."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "cloud-provisioning",
+    "source": "Example Engineer\nExample employer\nIntegrated provisioning workflows with Terraform and built container services.\nA separate initiative reduced costs by 20%.\nEducation: Example University.",
+    "result": {
+      "meta": {
+        "promptVersion": "v3",
+        "model": "gpt-6.1-sol",
+        "jobDescriptionProvided": true,
+        "confidence": 0.8,
+        "assumptions": [],
+        "limitations": [],
+        "mode": "JOB_MATCH",
+        "primaryScoreType": "JOB_MATCH"
+      },
+      "summary": {
+        "overallAssessment": "Relevant implementation evidence; the remaining requirements need careful review.",
+        "strengths": [
+          "Concrete implementation work."
+        ],
+        "weaknesses": [
+          "Four years of Terraform is not demonstrated."
+        ]
+      },
+      "ats": {
+        "score": 82,
+        "scoreBreakdown": {
+          "skills": 25,
+          "experience": 25,
+          "impact": 20,
+          "formatting": 15,
+          "roleFit": 15
+        },
+        "scoreReasoning": [
+          "Core backend skills are clear.",
+          "Experience aligns with the target role.",
+          "Impact is present but can be sharper."
+        ],
+        "scoreExplanation": {
+          "components": [
+            {
+              "key": "atsReadability",
+              "label": "ATS Readability",
+              "score": 80,
+              "weight": 25,
+              "explanation": "Clear headings and parseable structure.",
+              "helped": [
+                "Standard section titles"
+              ],
+              "dragged": [
+                "Dense bullets"
+              ]
+            },
+            {
+              "key": "skillMatch",
+              "label": "Skill Match",
+              "score": 85,
+              "weight": 30,
+              "explanation": "Backend skills match the role.",
+              "helped": [
+                "Go",
+                "AWS"
+              ],
+              "dragged": [
+                "Few queueing details"
+              ]
+            },
+            {
+              "key": "experienceRelevance",
+              "label": "Experience Relevance",
+              "score": 82,
+              "weight": 30,
+              "explanation": "Recent experience fits the job.",
+              "helped": [
+                "API ownership"
+              ],
+              "dragged": [
+                "Limited system scale evidence"
+              ]
+            },
+            {
+              "key": "resumeStructure",
+              "label": "Resume Structure",
+              "score": 78,
+              "weight": 15,
+              "explanation": "Sections are easy to scan.",
+              "helped": [
+                "Concise layout"
+              ],
+              "dragged": [
+                "Some bullets lack metrics"
+              ]
+            }
+          ]
+        },
+        "missingKeywords": {
+          "fromJobDescription": [],
+          "industryCommon": []
+        },
+        "formattingIssues": []
+      },
+      "issues": [],
+      "bulletRewrites": [],
+      "missingInformation": [],
+      "actionPlan": {
+        "quickWins": [],
+        "mediumEffort": [],
+        "deepFixes": []
+      },
+      "jobRequirementProfile": {
+        "isApplicable": true,
+        "primaryRole": "Engineer",
+        "seniority": "SENIOR",
+        "roleType": "BACKEND",
+        "recruiterIntentSummary": "Demonstrate implementation, delivery discipline and operational responsibility.",
+        "topPriorities": [
+          {
+            "id": "implementation",
+            "priority": "Hands-on implementation",
+            "importance": "HIGH",
+            "weight": 50,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "delivery",
+            "priority": "Delivery and validation",
+            "importance": "HIGH",
+            "weight": 30,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "operations",
+            "priority": "Operational responsibility",
+            "importance": "HIGH",
+            "weight": 20,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          }
+        ],
+        "hiddenExpectations": [],
+        "niceToHaveSignals": []
+      },
+      "jobMatchScoring": {
+        "score": 63,
+        "scoringStrategy": "JD_WEIGHTED",
+        "requirementScores": [
+          {
+            "requirementId": "implementation",
+            "requirement": "Hands-on implementation",
+            "weight": 50,
+            "score": 70,
+            "weightedContribution": 35.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "Integrated provisioning workflows with Terraform and built container services.",
+            "gap": "Four years of Terraform is not demonstrated."
+          },
+          {
+            "requirementId": "delivery",
+            "requirement": "Delivery and validation",
+            "weight": 30,
+            "score": 60,
+            "weightedContribution": 18.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "Four years of Terraform is not demonstrated."
+          },
+          {
+            "requirementId": "operations",
+            "requirement": "Operational responsibility",
+            "weight": 20,
+            "score": 50,
+            "weightedContribution": 10.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "Four years of Terraform is not demonstrated."
+          }
+        ],
+        "explanation": "Illustrative fixture rubric; not a generated candidate assessment."
+      },
+      "aiScreening": {
+        "score": 70,
+        "verdict": {
+          "tier": "GOOD",
+          "title": "Relevant evidence, with scope to clarify",
+          "summary": "Source implementation is visible; broader responsibility needs confirmation.",
+          "screeningRisk": "LOW"
+        },
+        "scoreBreakdown": [
+          {
+            "id": "semantic_relevance",
+            "label": "Semantic Relevance",
+            "score": 70,
+            "weight": 25,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "role_intent_alignment",
+            "label": "Role Intent Alignment",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "evidence_strength",
+            "label": "Evidence Strength",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "impact_strength",
+            "label": "Impact Strength",
+            "score": 70,
+            "weight": 15,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "signal_density",
+            "label": "Signal Density",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "clarity_specificity",
+            "label": "Clarity Specificity",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          }
+        ],
+        "aiRecruiterVerdict": {
+          "oneLineVerdict": "Relevant implementation evidence; the remaining requirements need careful review.",
+          "mainConcern": "Four years of Terraform is not demonstrated.",
+          "strongestSignal": "The resume describes specific implementation work.",
+          "weakestSignal": "Broader responsibility and validation are unclear."
+        }
+      },
+      "fixThisFirst": [],
+      "report": {
+        "schemaVersion": "3",
+        "scope": "SELECTED_PASSAGES",
+        "priorities": [
+          {
+            "title": "Make the existing implementation clearer",
+            "reason": "Use source-supported work rather than adding claims.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "edits": [
+          {
+            "id": "implementation",
+            "operation": "replace",
+            "section": "Example employer \u2014 implementation",
+            "before": "Integrated provisioning workflows with Terraform and built container services.",
+            "after": "Built container services and integrated provisioning workflows with Terraform.",
+            "insertAfter": "",
+            "reason": "Preserve actual scope and clarify the existing evidence.",
+            "sourceQuotes": [
+              "Integrated provisioning workflows with Terraform and built container services."
+            ],
+            "requirementIds": []
+          }
+        ],
+        "sections": [
+          {
+            "heading": "Example employer",
+            "editIds": [
+              "implementation"
+            ],
+            "retained": [
+              {
+                "text": "A separate initiative reduced costs by 20%.",
+                "sourceQuote": "A separate initiative reduced costs by 20%."
+              }
+            ]
+          }
+        ],
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Which implementation decision did you personally make, and how did you validate it?",
+            "why": "Concrete scope could strengthen the evidence without inventing a metric.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "outcomes": {
+          "clearerNow": [
+            "Existing implementation work."
+          ],
+          "needsConfirmation": [
+            "Personal scope and validation."
+          ],
+          "stillUnresolved": [
+            "Four years of Terraform is not demonstrated."
+          ]
+        },
+        "cleanup": [],
+        "interviewPreparation": [
+          "Explain the implementation and its validation."
+        ],
+        "coverage": [
+          {
+            "sourceQuote": "Integrated provisioning workflows with Terraform and built container services.",
+            "disposition": "rewritten",
+            "reason": "Used in the selected passages."
+          },
+          {
+            "sourceQuote": "A separate initiative reduced costs by 20%.",
+            "disposition": "retained",
+            "reason": "Keep the unique outcome separate."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "earlier-java",
+    "source": "Example Engineer\nExample employer\nBuilt Angular interfaces backed by Spring Boot microservices.\nA separate initiative reduced costs by 20%.\nEducation: Example University.",
+    "result": {
+      "meta": {
+        "promptVersion": "v3",
+        "model": "gpt-6.1-sol",
+        "jobDescriptionProvided": true,
+        "confidence": 0.8,
+        "assumptions": [],
+        "limitations": [],
+        "mode": "JOB_MATCH",
+        "primaryScoreType": "JOB_MATCH"
+      },
+      "summary": {
+        "overallAssessment": "Relevant implementation evidence; the remaining requirements need careful review.",
+        "strengths": [
+          "Concrete implementation work."
+        ],
+        "weaknesses": [
+          "The required professional tenure remains unestablished."
+        ]
+      },
+      "ats": {
+        "score": 82,
+        "scoreBreakdown": {
+          "skills": 25,
+          "experience": 25,
+          "impact": 20,
+          "formatting": 15,
+          "roleFit": 15
+        },
+        "scoreReasoning": [
+          "Core backend skills are clear.",
+          "Experience aligns with the target role.",
+          "Impact is present but can be sharper."
+        ],
+        "scoreExplanation": {
+          "components": [
+            {
+              "key": "atsReadability",
+              "label": "ATS Readability",
+              "score": 80,
+              "weight": 25,
+              "explanation": "Clear headings and parseable structure.",
+              "helped": [
+                "Standard section titles"
+              ],
+              "dragged": [
+                "Dense bullets"
+              ]
+            },
+            {
+              "key": "skillMatch",
+              "label": "Skill Match",
+              "score": 85,
+              "weight": 30,
+              "explanation": "Backend skills match the role.",
+              "helped": [
+                "Go",
+                "AWS"
+              ],
+              "dragged": [
+                "Few queueing details"
+              ]
+            },
+            {
+              "key": "experienceRelevance",
+              "label": "Experience Relevance",
+              "score": 82,
+              "weight": 30,
+              "explanation": "Recent experience fits the job.",
+              "helped": [
+                "API ownership"
+              ],
+              "dragged": [
+                "Limited system scale evidence"
+              ]
+            },
+            {
+              "key": "resumeStructure",
+              "label": "Resume Structure",
+              "score": 78,
+              "weight": 15,
+              "explanation": "Sections are easy to scan.",
+              "helped": [
+                "Concise layout"
+              ],
+              "dragged": [
+                "Some bullets lack metrics"
+              ]
+            }
+          ]
+        },
+        "missingKeywords": {
+          "fromJobDescription": [],
+          "industryCommon": []
+        },
+        "formattingIssues": []
+      },
+      "issues": [],
+      "bulletRewrites": [],
+      "missingInformation": [],
+      "actionPlan": {
+        "quickWins": [],
+        "mediumEffort": [],
+        "deepFixes": []
+      },
+      "jobRequirementProfile": {
+        "isApplicable": true,
+        "primaryRole": "Engineer",
+        "seniority": "SENIOR",
+        "roleType": "BACKEND",
+        "recruiterIntentSummary": "Demonstrate implementation, delivery discipline and operational responsibility.",
+        "topPriorities": [
+          {
+            "id": "implementation",
+            "priority": "Hands-on implementation",
+            "importance": "HIGH",
+            "weight": 50,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "delivery",
+            "priority": "Delivery and validation",
+            "importance": "HIGH",
+            "weight": 30,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "operations",
+            "priority": "Operational responsibility",
+            "importance": "HIGH",
+            "weight": 20,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          }
+        ],
+        "hiddenExpectations": [],
+        "niceToHaveSignals": []
+      },
+      "jobMatchScoring": {
+        "score": 63,
+        "scoringStrategy": "JD_WEIGHTED",
+        "requirementScores": [
+          {
+            "requirementId": "implementation",
+            "requirement": "Hands-on implementation",
+            "weight": 50,
+            "score": 70,
+            "weightedContribution": 35.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "Built Angular interfaces backed by Spring Boot microservices.",
+            "gap": "The required professional tenure remains unestablished."
+          },
+          {
+            "requirementId": "delivery",
+            "requirement": "Delivery and validation",
+            "weight": 30,
+            "score": 60,
+            "weightedContribution": 18.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "The required professional tenure remains unestablished."
+          },
+          {
+            "requirementId": "operations",
+            "requirement": "Operational responsibility",
+            "weight": 20,
+            "score": 50,
+            "weightedContribution": 10.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "The required professional tenure remains unestablished."
+          }
+        ],
+        "explanation": "Illustrative fixture rubric; not a generated candidate assessment."
+      },
+      "aiScreening": {
+        "score": 70,
+        "verdict": {
+          "tier": "GOOD",
+          "title": "Relevant evidence, with scope to clarify",
+          "summary": "Source implementation is visible; broader responsibility needs confirmation.",
+          "screeningRisk": "LOW"
+        },
+        "scoreBreakdown": [
+          {
+            "id": "semantic_relevance",
+            "label": "Semantic Relevance",
+            "score": 70,
+            "weight": 25,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "role_intent_alignment",
+            "label": "Role Intent Alignment",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "evidence_strength",
+            "label": "Evidence Strength",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "impact_strength",
+            "label": "Impact Strength",
+            "score": 70,
+            "weight": 15,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "signal_density",
+            "label": "Signal Density",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "clarity_specificity",
+            "label": "Clarity Specificity",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          }
+        ],
+        "aiRecruiterVerdict": {
+          "oneLineVerdict": "Relevant implementation evidence; the remaining requirements need careful review.",
+          "mainConcern": "The required professional tenure remains unestablished.",
+          "strongestSignal": "The resume describes specific implementation work.",
+          "weakestSignal": "Broader responsibility and validation are unclear."
+        }
+      },
+      "fixThisFirst": [],
+      "report": {
+        "schemaVersion": "3",
+        "scope": "SELECTED_PASSAGES",
+        "priorities": [
+          {
+            "title": "Make the existing implementation clearer",
+            "reason": "Use source-supported work rather than adding claims.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "edits": [
+          {
+            "id": "implementation",
+            "operation": "replace",
+            "section": "Example employer \u2014 implementation",
+            "before": "Built Angular interfaces backed by Spring Boot microservices.",
+            "after": "Built Spring Boot microservices and Angular interfaces.",
+            "insertAfter": "",
+            "reason": "Preserve actual scope and clarify the existing evidence.",
+            "sourceQuotes": [
+              "Built Angular interfaces backed by Spring Boot microservices."
+            ],
+            "requirementIds": []
+          }
+        ],
+        "sections": [
+          {
+            "heading": "Example employer",
+            "editIds": [
+              "implementation"
+            ],
+            "retained": [
+              {
+                "text": "A separate initiative reduced costs by 20%.",
+                "sourceQuote": "A separate initiative reduced costs by 20%."
+              }
+            ]
+          }
+        ],
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Which implementation decision did you personally make, and how did you validate it?",
+            "why": "Concrete scope could strengthen the evidence without inventing a metric.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "outcomes": {
+          "clearerNow": [
+            "Existing implementation work."
+          ],
+          "needsConfirmation": [
+            "Personal scope and validation."
+          ],
+          "stillUnresolved": [
+            "The required professional tenure remains unestablished."
+          ]
+        },
+        "cleanup": [],
+        "interviewPreparation": [
+          "Explain the implementation and its validation."
+        ],
+        "coverage": [
+          {
+            "sourceQuote": "Built Angular interfaces backed by Spring Boot microservices.",
+            "disposition": "rewritten",
+            "reason": "Used in the selected passages."
+          },
+          {
+            "sourceQuote": "A separate initiative reduced costs by 20%.",
+            "disposition": "retained",
+            "reason": "Keep the unique outcome separate."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "database-release",
+    "source": "Example Engineer\nExample employer\nImplemented database automation using Jenkins.\nIntegrated database changes with CI/CD and version control.\nA separate initiative reduced costs by 20%.\nEducation: Example University.",
+    "result": {
+      "meta": {
+        "promptVersion": "v3",
+        "model": "gpt-6.1-sol",
+        "jobDescriptionProvided": true,
+        "confidence": 0.8,
+        "assumptions": [],
+        "limitations": [],
+        "mode": "JOB_MATCH",
+        "primaryScoreType": "JOB_MATCH"
+      },
+      "summary": {
+        "overallAssessment": "Relevant implementation evidence; the remaining requirements need careful review.",
+        "strengths": [
+          "Concrete implementation work."
+        ],
+        "weaknesses": [
+          "Infrastructure-as-code ownership needs confirmation."
+        ]
+      },
+      "ats": {
+        "score": 82,
+        "scoreBreakdown": {
+          "skills": 25,
+          "experience": 25,
+          "impact": 20,
+          "formatting": 15,
+          "roleFit": 15
+        },
+        "scoreReasoning": [
+          "Core backend skills are clear.",
+          "Experience aligns with the target role.",
+          "Impact is present but can be sharper."
+        ],
+        "scoreExplanation": {
+          "components": [
+            {
+              "key": "atsReadability",
+              "label": "ATS Readability",
+              "score": 80,
+              "weight": 25,
+              "explanation": "Clear headings and parseable structure.",
+              "helped": [
+                "Standard section titles"
+              ],
+              "dragged": [
+                "Dense bullets"
+              ]
+            },
+            {
+              "key": "skillMatch",
+              "label": "Skill Match",
+              "score": 85,
+              "weight": 30,
+              "explanation": "Backend skills match the role.",
+              "helped": [
+                "Go",
+                "AWS"
+              ],
+              "dragged": [
+                "Few queueing details"
+              ]
+            },
+            {
+              "key": "experienceRelevance",
+              "label": "Experience Relevance",
+              "score": 82,
+              "weight": 30,
+              "explanation": "Recent experience fits the job.",
+              "helped": [
+                "API ownership"
+              ],
+              "dragged": [
+                "Limited system scale evidence"
+              ]
+            },
+            {
+              "key": "resumeStructure",
+              "label": "Resume Structure",
+              "score": 78,
+              "weight": 15,
+              "explanation": "Sections are easy to scan.",
+              "helped": [
+                "Concise layout"
+              ],
+              "dragged": [
+                "Some bullets lack metrics"
+              ]
+            }
+          ]
+        },
+        "missingKeywords": {
+          "fromJobDescription": [],
+          "industryCommon": []
+        },
+        "formattingIssues": []
+      },
+      "issues": [],
+      "bulletRewrites": [],
+      "missingInformation": [],
+      "actionPlan": {
+        "quickWins": [],
+        "mediumEffort": [],
+        "deepFixes": []
+      },
+      "jobRequirementProfile": {
+        "isApplicable": true,
+        "primaryRole": "Engineer",
+        "seniority": "SENIOR",
+        "roleType": "BACKEND",
+        "recruiterIntentSummary": "Demonstrate implementation, delivery discipline and operational responsibility.",
+        "topPriorities": [
+          {
+            "id": "implementation",
+            "priority": "Hands-on implementation",
+            "importance": "HIGH",
+            "weight": 50,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "delivery",
+            "priority": "Delivery and validation",
+            "importance": "HIGH",
+            "weight": 30,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "operations",
+            "priority": "Operational responsibility",
+            "importance": "HIGH",
+            "weight": 20,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          }
+        ],
+        "hiddenExpectations": [],
+        "niceToHaveSignals": []
+      },
+      "jobMatchScoring": {
+        "score": 63,
+        "scoringStrategy": "JD_WEIGHTED",
+        "requirementScores": [
+          {
+            "requirementId": "implementation",
+            "requirement": "Hands-on implementation",
+            "weight": 50,
+            "score": 70,
+            "weightedContribution": 35.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "Implemented database automation using Jenkins.\nIntegrated database changes with CI/CD and version control.",
+            "gap": "Infrastructure-as-code ownership needs confirmation."
+          },
+          {
+            "requirementId": "delivery",
+            "requirement": "Delivery and validation",
+            "weight": 30,
+            "score": 60,
+            "weightedContribution": 18.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "Infrastructure-as-code ownership needs confirmation."
+          },
+          {
+            "requirementId": "operations",
+            "requirement": "Operational responsibility",
+            "weight": 20,
+            "score": 50,
+            "weightedContribution": 10.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "Infrastructure-as-code ownership needs confirmation."
+          }
+        ],
+        "explanation": "Illustrative fixture rubric; not a generated candidate assessment."
+      },
+      "aiScreening": {
+        "score": 70,
+        "verdict": {
+          "tier": "GOOD",
+          "title": "Relevant evidence, with scope to clarify",
+          "summary": "Source implementation is visible; broader responsibility needs confirmation.",
+          "screeningRisk": "LOW"
+        },
+        "scoreBreakdown": [
+          {
+            "id": "semantic_relevance",
+            "label": "Semantic Relevance",
+            "score": 70,
+            "weight": 25,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "role_intent_alignment",
+            "label": "Role Intent Alignment",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "evidence_strength",
+            "label": "Evidence Strength",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "impact_strength",
+            "label": "Impact Strength",
+            "score": 70,
+            "weight": 15,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "signal_density",
+            "label": "Signal Density",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "clarity_specificity",
+            "label": "Clarity Specificity",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          }
+        ],
+        "aiRecruiterVerdict": {
+          "oneLineVerdict": "Relevant implementation evidence; the remaining requirements need careful review.",
+          "mainConcern": "Infrastructure-as-code ownership needs confirmation.",
+          "strongestSignal": "The resume describes specific implementation work.",
+          "weakestSignal": "Broader responsibility and validation are unclear."
+        }
+      },
+      "fixThisFirst": [],
+      "report": {
+        "schemaVersion": "3",
+        "scope": "SELECTED_PASSAGES",
+        "priorities": [
+          {
+            "title": "Make the existing implementation clearer",
+            "reason": "Use source-supported work rather than adding claims.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "edits": [
+          {
+            "id": "implementation",
+            "operation": "merge",
+            "section": "Example employer \u2014 implementation",
+            "before": "Implemented database automation using Jenkins.\nIntegrated database changes with CI/CD and version control.",
+            "after": "Implemented Jenkins database automation integrated with CI/CD and version control.",
+            "insertAfter": "",
+            "reason": "Preserve actual scope and clarify the existing evidence.",
+            "sourceQuotes": [
+              "Implemented database automation using Jenkins.\nIntegrated database changes with CI/CD and version control."
+            ],
+            "requirementIds": []
+          }
+        ],
+        "sections": [
+          {
+            "heading": "Example employer",
+            "editIds": [
+              "implementation"
+            ],
+            "retained": [
+              {
+                "text": "A separate initiative reduced costs by 20%.",
+                "sourceQuote": "A separate initiative reduced costs by 20%."
+              }
+            ]
+          }
+        ],
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Which implementation decision did you personally make, and how did you validate it?",
+            "why": "Concrete scope could strengthen the evidence without inventing a metric.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "outcomes": {
+          "clearerNow": [
+            "Existing implementation work."
+          ],
+          "needsConfirmation": [
+            "Personal scope and validation."
+          ],
+          "stillUnresolved": [
+            "Infrastructure-as-code ownership needs confirmation."
+          ]
+        },
+        "cleanup": [],
+        "interviewPreparation": [
+          "Explain the implementation and its validation."
+        ],
+        "coverage": [
+          {
+            "sourceQuote": "Implemented database automation using Jenkins.\nIntegrated database changes with CI/CD and version control.",
+            "disposition": "rewritten",
+            "reason": "Used in the selected passages."
+          },
+          {
+            "sourceQuote": "A separate initiative reduced costs by 20%.",
+            "disposition": "retained",
+            "reason": "Keep the unique outcome separate."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "application-integration",
+    "source": "Example Engineer\nExample employer\nDesigned REST APIs through AWS API Gateway and Lambda handlers.\nA separate initiative reduced costs by 20%.\nEducation: Example University.",
+    "result": {
+      "meta": {
+        "promptVersion": "v3",
+        "model": "gpt-6.1-sol",
+        "jobDescriptionProvided": true,
+        "confidence": 0.8,
+        "assumptions": [],
+        "limitations": [],
+        "mode": "JOB_MATCH",
+        "primaryScoreType": "JOB_MATCH"
+      },
+      "summary": {
+        "overallAssessment": "Relevant implementation evidence; the remaining requirements need careful review.",
+        "strengths": [
+          "Concrete implementation work."
+        ],
+        "weaknesses": [
+          "API integration does not establish infrastructure administration tenure."
+        ]
+      },
+      "ats": {
+        "score": 82,
+        "scoreBreakdown": {
+          "skills": 25,
+          "experience": 25,
+          "impact": 20,
+          "formatting": 15,
+          "roleFit": 15
+        },
+        "scoreReasoning": [
+          "Core backend skills are clear.",
+          "Experience aligns with the target role.",
+          "Impact is present but can be sharper."
+        ],
+        "scoreExplanation": {
+          "components": [
+            {
+              "key": "atsReadability",
+              "label": "ATS Readability",
+              "score": 80,
+              "weight": 25,
+              "explanation": "Clear headings and parseable structure.",
+              "helped": [
+                "Standard section titles"
+              ],
+              "dragged": [
+                "Dense bullets"
+              ]
+            },
+            {
+              "key": "skillMatch",
+              "label": "Skill Match",
+              "score": 85,
+              "weight": 30,
+              "explanation": "Backend skills match the role.",
+              "helped": [
+                "Go",
+                "AWS"
+              ],
+              "dragged": [
+                "Few queueing details"
+              ]
+            },
+            {
+              "key": "experienceRelevance",
+              "label": "Experience Relevance",
+              "score": 82,
+              "weight": 30,
+              "explanation": "Recent experience fits the job.",
+              "helped": [
+                "API ownership"
+              ],
+              "dragged": [
+                "Limited system scale evidence"
+              ]
+            },
+            {
+              "key": "resumeStructure",
+              "label": "Resume Structure",
+              "score": 78,
+              "weight": 15,
+              "explanation": "Sections are easy to scan.",
+              "helped": [
+                "Concise layout"
+              ],
+              "dragged": [
+                "Some bullets lack metrics"
+              ]
+            }
+          ]
+        },
+        "missingKeywords": {
+          "fromJobDescription": [],
+          "industryCommon": []
+        },
+        "formattingIssues": []
+      },
+      "issues": [],
+      "bulletRewrites": [],
+      "missingInformation": [],
+      "actionPlan": {
+        "quickWins": [],
+        "mediumEffort": [],
+        "deepFixes": []
+      },
+      "jobRequirementProfile": {
+        "isApplicable": true,
+        "primaryRole": "Engineer",
+        "seniority": "SENIOR",
+        "roleType": "BACKEND",
+        "recruiterIntentSummary": "Demonstrate implementation, delivery discipline and operational responsibility.",
+        "topPriorities": [
+          {
+            "id": "implementation",
+            "priority": "Hands-on implementation",
+            "importance": "HIGH",
+            "weight": 50,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "delivery",
+            "priority": "Delivery and validation",
+            "importance": "HIGH",
+            "weight": 30,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          },
+          {
+            "id": "operations",
+            "priority": "Operational responsibility",
+            "importance": "HIGH",
+            "weight": 20,
+            "evidenceExpected": "Specific personal work and scope.",
+            "resumeMatchStatus": "PARTIAL",
+            "whyItMatters": "The example role asks for demonstrable technical responsibility."
+          }
+        ],
+        "hiddenExpectations": [],
+        "niceToHaveSignals": []
+      },
+      "jobMatchScoring": {
+        "score": 63,
+        "scoringStrategy": "JD_WEIGHTED",
+        "requirementScores": [
+          {
+            "requirementId": "implementation",
+            "requirement": "Hands-on implementation",
+            "weight": 50,
+            "score": 70,
+            "weightedContribution": 35.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "Designed REST APIs through AWS API Gateway and Lambda handlers.",
+            "gap": "API integration does not establish infrastructure administration tenure."
+          },
+          {
+            "requirementId": "delivery",
+            "requirement": "Delivery and validation",
+            "weight": 30,
+            "score": 60,
+            "weightedContribution": 18.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "API integration does not establish infrastructure administration tenure."
+          },
+          {
+            "requirementId": "operations",
+            "requirement": "Operational responsibility",
+            "weight": 20,
+            "score": 50,
+            "weightedContribution": 10.0,
+            "matchStatus": "PARTIAL",
+            "evidence": "",
+            "gap": "API integration does not establish infrastructure administration tenure."
+          }
+        ],
+        "explanation": "Illustrative fixture rubric; not a generated candidate assessment."
+      },
+      "aiScreening": {
+        "score": 70,
+        "verdict": {
+          "tier": "GOOD",
+          "title": "Relevant evidence, with scope to clarify",
+          "summary": "Source implementation is visible; broader responsibility needs confirmation.",
+          "screeningRisk": "LOW"
+        },
+        "scoreBreakdown": [
+          {
+            "id": "semantic_relevance",
+            "label": "Semantic Relevance",
+            "score": 70,
+            "weight": 25,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "role_intent_alignment",
+            "label": "Role Intent Alignment",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "evidence_strength",
+            "label": "Evidence Strength",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "impact_strength",
+            "label": "Impact Strength",
+            "score": 70,
+            "weight": 15,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "signal_density",
+            "label": "Signal Density",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "clarity_specificity",
+            "label": "Clarity Specificity",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          }
+        ],
+        "aiRecruiterVerdict": {
+          "oneLineVerdict": "Relevant implementation evidence; the remaining requirements need careful review.",
+          "mainConcern": "API integration does not establish infrastructure administration tenure.",
+          "strongestSignal": "The resume describes specific implementation work.",
+          "weakestSignal": "Broader responsibility and validation are unclear."
+        }
+      },
+      "fixThisFirst": [],
+      "report": {
+        "schemaVersion": "3",
+        "scope": "SELECTED_PASSAGES",
+        "priorities": [
+          {
+            "title": "Make the existing implementation clearer",
+            "reason": "Use source-supported work rather than adding claims.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "edits": [
+          {
+            "id": "implementation",
+            "operation": "replace",
+            "section": "Example employer \u2014 implementation",
+            "before": "Designed REST APIs through AWS API Gateway and Lambda handlers.",
+            "after": "Designed REST APIs using AWS API Gateway and Lambda handlers.",
+            "insertAfter": "",
+            "reason": "Preserve actual scope and clarify the existing evidence.",
+            "sourceQuotes": [
+              "Designed REST APIs through AWS API Gateway and Lambda handlers."
+            ],
+            "requirementIds": []
+          }
+        ],
+        "sections": [
+          {
+            "heading": "Example employer",
+            "editIds": [
+              "implementation"
+            ],
+            "retained": [
+              {
+                "text": "A separate initiative reduced costs by 20%.",
+                "sourceQuote": "A separate initiative reduced costs by 20%."
+              }
+            ]
+          }
+        ],
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Which implementation decision did you personally make, and how did you validate it?",
+            "why": "Concrete scope could strengthen the evidence without inventing a metric.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "outcomes": {
+          "clearerNow": [
+            "Existing implementation work."
+          ],
+          "needsConfirmation": [
+            "Personal scope and validation."
+          ],
+          "stillUnresolved": [
+            "API integration does not establish infrastructure administration tenure."
+          ]
+        },
+        "cleanup": [],
+        "interviewPreparation": [
+          "Explain the implementation and its validation."
+        ],
+        "coverage": [
+          {
+            "sourceQuote": "Designed REST APIs through AWS API Gateway and Lambda handlers.",
+            "disposition": "rewritten",
+            "reason": "Used in the selected passages."
+          },
+          {
+            "sourceQuote": "A separate initiative reduced costs by 20%.",
+            "disposition": "retained",
+            "reason": "Keep the unique outcome separate."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "strong-no-jd",
+    "source": "Example Engineer\nExample employer\nDeveloped REST APIs and implemented database migrations.\nA separate initiative reduced costs by 20%.\nEducation: Example University.",
+    "result": {
+      "meta": {
+        "promptVersion": "v3",
+        "model": "gpt-6.1-sol",
+        "jobDescriptionProvided": false,
+        "confidence": 0.75,
+        "assumptions": [],
+        "limitations": [],
+        "mode": "ATS",
+        "primaryScoreType": "ATS"
+      },
+      "summary": {
+        "overallAssessment": "Concrete implementation evidence is present. Preserve strong content and clarify any remaining document issues.",
+        "strengths": [
+          "Concrete implementation work."
+        ],
+        "weaknesses": [
+          "No additional qualification judgment without a target job."
+        ]
+      },
+      "ats": {
+        "score": 82,
+        "scoreBreakdown": {
+          "skills": 25,
+          "experience": 25,
+          "impact": 20,
+          "formatting": 15,
+          "roleFit": 15
+        },
+        "scoreReasoning": [
+          "Core skills are visible.",
+          "Experience is easy to scan.",
+          "Impact could be more specific."
+        ],
+        "scoreExplanation": {
+          "components": [
+            {
+              "key": "atsReadability",
+              "label": "ATS Readability",
+              "score": 82,
+              "weight": 25,
+              "explanation": "Clear section headings.",
+              "helped": [
+                "Standard headings"
+              ],
+              "dragged": [
+                "Dense bullets"
+              ]
+            },
+            {
+              "key": "skillMatch",
+              "label": "Skill Match",
+              "score": 80,
+              "weight": 30,
+              "explanation": "Skills are easy to identify.",
+              "helped": [
+                "Skills section"
+              ],
+              "dragged": [
+                "Some tools are missing context"
+              ]
+            },
+            {
+              "key": "experienceRelevance",
+              "label": "Experience Relevance",
+              "score": 82,
+              "weight": 30,
+              "explanation": "Recent roles are relevant.",
+              "helped": [
+                "Recent experience"
+              ],
+              "dragged": [
+                "Limited project scale"
+              ]
+            },
+            {
+              "key": "resumeStructure",
+              "label": "Resume Structure",
+              "score": 84,
+              "weight": 15,
+              "explanation": "Structure is consistent.",
+              "helped": [
+                "Concise layout"
+              ],
+              "dragged": [
+                "No major issues noted"
+              ]
+            }
+          ]
+        },
+        "missingKeywords": {
+          "fromJobDescription": [],
+          "industryCommon": []
+        },
+        "formattingIssues": []
+      },
+      "issues": [],
+      "bulletRewrites": [],
+      "missingInformation": [],
+      "actionPlan": {
+        "quickWins": [],
+        "mediumEffort": [],
+        "deepFixes": []
+      },
+      "jobRequirementProfile": {
+        "isApplicable": false,
+        "primaryRole": "",
+        "seniority": "UNCLEAR",
+        "roleType": "UNCLEAR",
+        "recruiterIntentSummary": "",
+        "topPriorities": [],
+        "hiddenExpectations": [],
+        "niceToHaveSignals": []
+      },
+      "jobMatchScoring": {
+        "score": 0,
+        "scoringStrategy": "",
+        "requirementScores": [],
+        "explanation": ""
+      },
+      "aiScreening": {
+        "score": 70,
+        "verdict": {
+          "tier": "GOOD",
+          "title": "Relevant evidence, with scope to clarify",
+          "summary": "Source implementation is visible; broader responsibility needs confirmation.",
+          "screeningRisk": "LOW"
+        },
+        "scoreBreakdown": [
+          {
+            "id": "semantic_relevance",
+            "label": "Semantic Relevance",
+            "score": 70,
+            "weight": 25,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "role_intent_alignment",
+            "label": "Role Intent Alignment",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "evidence_strength",
+            "label": "Evidence Strength",
+            "score": 70,
+            "weight": 20,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "impact_strength",
+            "label": "Impact Strength",
+            "score": 70,
+            "weight": 15,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "signal_density",
+            "label": "Signal Density",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          },
+          {
+            "id": "clarity_specificity",
+            "label": "Clarity Specificity",
+            "score": 70,
+            "weight": 10,
+            "status": "OK",
+            "explanation": "Specific implementation work is present; its scope could be clearer.",
+            "improvementFocus": "Clarify the actual contribution without adding experience."
+          }
+        ],
+        "aiRecruiterVerdict": {
+          "oneLineVerdict": "Concrete implementation evidence is present. Preserve strong content and clarify any remaining document issues.",
+          "mainConcern": "No additional qualification judgment without a target job.",
+          "strongestSignal": "The resume describes specific implementation work.",
+          "weakestSignal": "Broader responsibility and validation are unclear."
+        }
+      },
+      "fixThisFirst": [],
+      "report": {
+        "schemaVersion": "3",
+        "scope": "SELECTED_PASSAGES",
+        "priorities": [],
+        "edits": [
+          {
+            "id": "implementation",
+            "operation": "retain",
+            "section": "Example employer \u2014 implementation",
+            "before": "Developed REST APIs and implemented database migrations.",
+            "after": "Developed REST APIs and implemented database migrations.",
+            "insertAfter": "",
+            "reason": "Preserve actual scope and clarify the existing evidence.",
+            "sourceQuotes": [
+              "Developed REST APIs and implemented database migrations."
+            ],
+            "requirementIds": []
+          }
+        ],
+        "sections": [
+          {
+            "heading": "Example employer",
+            "editIds": [
+              "implementation"
+            ],
+            "retained": [
+              {
+                "text": "A separate initiative reduced costs by 20%.",
+                "sourceQuote": "A separate initiative reduced costs by 20%."
+              }
+            ]
+          }
+        ],
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Which implementation decision did you personally make, and how did you validate it?",
+            "why": "Concrete scope could strengthen the evidence without inventing a metric.",
+            "editIds": [
+              "implementation"
+            ]
+          }
+        ],
+        "outcomes": {
+          "clearerNow": [
+            "Existing implementation work."
+          ],
+          "needsConfirmation": [
+            "Personal scope and validation."
+          ],
+          "stillUnresolved": [
+            "No additional qualification judgment without a target job."
+          ]
+        },
+        "cleanup": [],
+        "interviewPreparation": [
+          "Explain the implementation and its validation."
+        ],
+        "coverage": [
+          {
+            "sourceQuote": "Developed REST APIs and implemented database migrations.",
+            "disposition": "retained",
+            "reason": "Used in the selected passages."
+          },
+          {
+            "sourceQuote": "A separate initiative reduced costs by 20%.",
+            "disposition": "retained",
+            "reason": "Keep the unique outcome separate."
+          }
+        ]
+      }
+    }
+  }
+]

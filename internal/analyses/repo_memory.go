@@ -51,6 +51,9 @@ func (r *MemoryRepo) GetOrCreateForDocument(ctx context.Context, analysis Analys
 		if existingMode != analysis.Mode || existing.JobDescription != analysis.JobDescription {
 			continue
 		}
+		if !compatibleAnalysis(existing, analysis) {
+			continue
+		}
 		if latest == nil || existing.CreatedAt.After(latest.CreatedAt) {
 			copy := existing
 			latest = &copy

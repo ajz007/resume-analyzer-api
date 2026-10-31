@@ -3,6 +3,8 @@ package llm
 import _ "embed"
 
 var (
+	//go:embed prompts/v3.txt
+	promptV3 string
 	//go:embed prompts/v1.txt
 	promptV1 string
 	//go:embed prompts/v2.txt
@@ -22,6 +24,8 @@ var (
 // PromptTemplate returns the prompt template text and whether the version was recognized.
 func PromptTemplate(version string) (string, bool) {
 	switch version {
+	case "v3":
+		return promptV3, true
 	case "v2_5":
 		return promptV2_5, true
 	case "v2_4":

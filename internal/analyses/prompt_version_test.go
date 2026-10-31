@@ -62,3 +62,9 @@ func TestUsesV2_4Schema(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizePromptVersionV3Accepted(t *testing.T) {
+	if NormalizePromptVersion("v3") != "v3" {
+		t.Fatal("V3 not accepted")
+	}
+}

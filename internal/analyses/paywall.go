@@ -10,6 +10,7 @@ type UnlockChecker interface {
 
 // Locked section identifiers returned to clients in lockedSections.
 const (
+	LockedReport             = "report"
 	LockedIssues             = "issues"
 	LockedBulletRewrites     = "bulletRewrites"
 	LockedRecommendations    = "recommendations"
@@ -32,7 +33,9 @@ func RedactForFreeTier(result map[string]any) (map[string]any, []string) {
 	}
 	out := make(map[string]any, len(result))
 	for k, v := range result {
-		out[k] = v
+		if k != reviewSessionKey {
+			out[k] = v
+		}
 	}
 
 	if issues, ok := out["issues"].([]any); ok && len(issues) > freeTierIssueLimit {
@@ -66,6 +69,13 @@ func RedactForFreeTier(result map[string]any) (map[string]any, []string) {
 	if jobLocked {
 		locked = append(locked, LockedJobRequirements)
 	}
+
+	if report, ok := out["report"].(map[string]any); ok {
+		// Allowlist only non-paid navigation. Never shallow-copy future report fields.
+		preview := map[string]any{"schemaVersion": report["schemaVersion"], "scope": report["scope"], "priorities": report["priorities"]}
+		out["report"] = preview
+		locked = append(locked, LockedReport)
+	}
 	return out, locked
 }
 
@@ -90,6 +100,18 @@ func withEmptyList(m map[string]any, key string) map[string]any {
 // applyPaywall redacts result for ownerID unless the report is unlocked. It returns the
 // result to send, whether it is locked, and the locked sections.
 func (h *Handler) applyPaywall(ctx context.Context, ownerID, analysisID string, result map[string]any) (map[string]any, bool, []string, error) {
+	// Answers and generation locks are owner-only through the dedicated review API.
+	// Never embed them in public shares, legacy result responses or paywall previews.
+	if result != nil {
+		clean := make(map[string]any, len(result))
+		for k, v := range result {
+			if k != reviewSessionKey {
+				clean[k] = v
+			}
+		}
+		result = clean
+	}
+
 	if h.Unlocks == nil || !h.Unlocks.PaywallActive() || result == nil {
 		return result, false, []string{}, nil
 	}

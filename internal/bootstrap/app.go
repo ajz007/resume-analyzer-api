@@ -272,9 +272,13 @@ func buildServices(app *App) error {
 		usageSvc = usage.NewService()
 	}
 
+	analysisModel := strings.TrimSpace(os.Getenv("ANALYSIS_MODEL"))
+	if analysisModel == "" {
+		analysisModel = app.Config.LLMModel
+	}
 	llmClient := llm.Client(llm.PlaceholderClient{})
 	if app.Config.LLMProvider == "openai" {
-		openaiClient, err := openai.NewClient(os.Getenv("OPENAI_API_KEY"), app.Config.LLMModel)
+		openaiClient, err := openai.NewClient(os.Getenv("OPENAI_API_KEY"), analysisModel)
 		if err != nil {
 			return err
 		}
@@ -298,7 +302,7 @@ func buildServices(app *App) error {
 		LLM:             llmClient,
 		JobQueue:        app.Queue,
 		Provider:        app.Config.LLMProvider,
-		Model:           app.Config.LLMModel,
+		Model:           analysisModel,
 		AnalysisVersion: app.Config.AnalysisVersion,
 		UIBaseURL:       strings.TrimSpace(app.Config.UIBaseURL),
 	}

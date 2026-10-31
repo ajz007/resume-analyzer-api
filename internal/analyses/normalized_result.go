@@ -11,6 +11,7 @@ import (
 
 // NormalizedAnalysisResult is the single normalized response schema returned by the API.
 type NormalizedAnalysisResult struct {
+	Report                *ReviewReport             `json:"report,omitempty"`
 	Meta                  MetaV2                    `json:"meta"`
 	Summary               SummaryV1                 `json:"summary"`
 	FinalScore            float64                   `json:"finalScore"`
@@ -29,6 +30,7 @@ type NormalizedAnalysisResult struct {
 
 func (r NormalizedAnalysisResult) MarshalJSON() ([]byte, error) {
 	type normalizedResponse struct {
+		Report                *ReviewReport             `json:"report,omitempty"`
 		Meta                  MetaV2                    `json:"meta"`
 		Summary               SummaryV1                 `json:"summary"`
 		FinalScore            float64                   `json:"finalScore"`
@@ -45,6 +47,7 @@ func (r NormalizedAnalysisResult) MarshalJSON() ([]byte, error) {
 		ActionPlan            ActionPlanV1              `json:"actionPlan"`
 	}
 	out := normalizedResponse{
+		Report:             r.Report,
 		Meta:               r.Meta,
 		Summary:            r.Summary,
 		FinalScore:         r.FinalScore,
@@ -56,7 +59,7 @@ func (r NormalizedAnalysisResult) MarshalJSON() ([]byte, error) {
 		MissingInformation: r.MissingInformation,
 		ActionPlan:         r.ActionPlan,
 	}
-	if usesV2_4Schema(r.Meta.PromptVersion) {
+	if usesV2_4Schema(r.Meta.PromptVersion) || r.Meta.PromptVersion == "v3" {
 		out.JobRequirementProfile = &r.JobRequirementProfile
 		out.JobMatchScoring = &r.JobMatchScoring
 		out.AIScreening = &r.AIScreening
@@ -127,6 +130,20 @@ func normalizeToFinal(raw json.RawMessage, analysis Analysis) (NormalizedAnalysi
 	}
 
 	switch {
+	case hasMeta && envelope.Meta.PromptVersion == "v3":
+		var parsed AnalysisResultV3
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return NormalizedAnalysisResult{}, err
+		}
+		if err := parsed.Report.Validate("", parsed.JobRequirementProfile.TopPriorities); err != nil {
+			return NormalizedAnalysisResult{}, err
+		}
+		out := normalizeFromV2_4(parsed.AnalysisResultV2_4, analysis)
+		out.Report = &parsed.Report
+		out.FixThisFirst = []FixThisFirstItemV1{}
+		out.Recommendations = []Recommendation{}
+		applyScoresV2_4(&out, analysis.Mode)
+		return out, validateNormalized(out)
 	case hasMeta && usesV2_4Schema(envelope.Meta.PromptVersion):
 		var parsed AnalysisResultV2_4
 		if err := json.Unmarshal(raw, &parsed); err != nil {

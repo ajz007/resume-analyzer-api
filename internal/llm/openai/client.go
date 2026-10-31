@@ -38,7 +38,7 @@ func NewClient(apiKey, model string) (*Client, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY is required")
 	}
-	timeout := 120 * time.Second
+	timeout := 240 * time.Second
 	if raw := strings.TrimSpace(os.Getenv("OPENAI_TIMEOUT_SECONDS")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			timeout = time.Duration(parsed) * time.Second
@@ -65,24 +65,35 @@ func NewClient(apiKey, model string) (*Client, error) {
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	Refusal string `json:"refusal,omitempty"`
 }
 
 type chatRequest struct {
-	Model          string         `json:"model"`
-	Messages       []chatMessage  `json:"messages"`
-	Temperature    *float32       `json:"temperature,omitempty"`
-	ResponseFormat responseFormat `json:"response_format,omitempty"`
+	Model               string         `json:"model"`
+	Messages            []chatMessage  `json:"messages"`
+	Temperature         *float32       `json:"temperature,omitempty"`
+	ResponseFormat      responseFormat `json:"response_format,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
 }
 
 type responseFormat struct {
-	Type string `json:"type"`
+	Type       string                `json:"type"`
+	JSONSchema *strictResponseSchema `json:"json_schema,omitempty"`
+}
+
+type strictResponseSchema struct {
+	Name   string          `json:"name"`
+	Strict bool            `json:"strict"`
+	Schema json.RawMessage `json:"schema"`
 }
 
 type chatResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Message chatMessage `json:"message"`
+		Message      chatMessage `json:"message"`
+		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -115,11 +126,14 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 	}
 	logUsage(c.model, input.PromptVersion, usage)
 
+	if len(input.ResponseSchema) > 0 {
+		return raw, nil
+	}
 	if json.Valid(raw) {
 		return raw, nil
 	}
 
-	fixMessages := buildFixPrompt(input.PromptVersion, input.JobDescription, c.model, raw)
+	fixMessages := BuildFixPrompt(input.PromptVersion, input.JobDescription, c.model, raw)
 	raw, usage, err = c.analyzeOnce(ctx, input, fixMessages)
 	if err != nil {
 		return nil, err
@@ -132,7 +146,7 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 }
 
 func (c *Client) analyzeFixJSON(ctx context.Context, input llm.AnalyzeInput, raw string) (json.RawMessage, error) {
-	fixMessages := buildFixPrompt(input.PromptVersion, input.JobDescription, c.model, []byte(raw))
+	fixMessages := BuildFixPrompt(input.PromptVersion, input.JobDescription, c.model, []byte(raw))
 	rawResp, usage, err := c.analyzeOnce(ctx, input, fixMessages)
 	if err != nil {
 		return nil, err
@@ -158,13 +172,23 @@ func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput
 		reqMessages = append(reqMessages, chatMessage{Role: m.Role, Content: m.Content})
 	}
 	reqBody := chatRequest{
-		Model:    c.model,
-		Messages: reqMessages,
+		Model:               c.model,
+		MaxCompletionTokens: input.MaxCompletionTokens,
+		Messages:            reqMessages,
 		ResponseFormat: responseFormat{
 			Type: "json_object",
 		},
 	}
+	if len(input.ResponseSchema) > 0 {
+		reqBody.ResponseFormat = responseFormat{Type: "json_schema", JSONSchema: &strictResponseSchema{Name: "resume_review_v3", Strict: true, Schema: input.ResponseSchema}}
+		reqBody.ReasoningEffort = strings.TrimSpace(os.Getenv("ANALYSIS_REASONING_EFFORT"))
+		if reqBody.ReasoningEffort == "" {
+			reqBody.ReasoningEffort = "medium"
+		}
+	}
 	tempSent := false
+	// Models that only accept the default temperature would reject the request and cost a retry.
+	omitTemperature = omitTemperature || rejectsTemperature(c.model)
 	if !omitTemperature && temp != 0 {
 		reqBody.Temperature = &temp
 		tempSent = true
@@ -220,6 +244,12 @@ func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput
 		return nil, nil, fmt.Errorf("openai response missing choices")
 	}
 
+	if parsed.Choices[0].Message.Refusal != "" {
+		return nil, nil, fmt.Errorf("model refused the analysis request")
+	}
+	if parsed.Choices[0].FinishReason == "length" {
+		return nil, nil, fmt.Errorf("model output was truncated")
+	}
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
 	if content == "" {
 		return nil, nil, fmt.Errorf("openai response empty content")
@@ -257,8 +287,10 @@ func logUsage(model, promptVersion string, usage *chatResponseUsage) {
 		model, promptVersion, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 }
 
-func isGPT5(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-5")
+// rejectsTemperature reports whether the model only accepts the default temperature.
+func rejectsTemperature(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "gpt-6")
 }
 
 func parseNoTemp0Models(raw string) map[string]struct{} {
@@ -312,3 +344,13 @@ func hashPromptString(prompt string) string {
 }
 
 var _ llm.Client = (*Client)(nil)
+
+// ReviseReview uses an isolated delta prompt, not the full-analysis prompt or repair.
+func (c *Client) ReviseReview(ctx context.Context, input llm.ReviewRevisionInput) (json.RawMessage, error) {
+	messages := []Message{{Role: "system", Content: input.SystemPrompt}, {Role: "user", Content: input.Payload}}
+	raw, usage, err := c.analyzeOnce(ctx, llm.AnalyzeInput{PromptVersion: "review-answer-v1", ResponseSchema: input.ResponseSchema, MaxCompletionTokens: 8192}, messages)
+	if err == nil {
+		logUsage(c.model, "review-answer-v1", usage)
+	}
+	return raw, err
+}
