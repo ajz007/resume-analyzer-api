@@ -156,3 +156,52 @@ func (c *RazorpayClient) FetchPayment(ctx context.Context, paymentID string) (Pr
 	}
 	return payment, nil
 }
+
+// FindOrder recovers a previously created order without creating another one.
+// Razorpay's receipt filter may use containment; enforce exact receipt matching.
+func (c *RazorpayClient) FindOrder(ctx context.Context, receipt string) (ProviderOrder, error) {
+	baseURL := strings.TrimRight(c.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = razorpayDefaultBaseURL
+	}
+	query := url.Values{"receipt": {receipt}, "count": {"100"}, "expand[]": {"payments"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/orders?"+query.Encode(), nil)
+	if err != nil {
+		return ProviderOrder{}, err
+	}
+	req.SetBasicAuth(c.KeyID, c.KeySecret)
+	client := c.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ProviderOrder{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ProviderOrder{}, fmt.Errorf("razorpay find order: status %d", resp.StatusCode)
+	}
+	var result struct {
+		Items []ProviderOrder `json:"items"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return ProviderOrder{}, err
+	}
+	if len(result.Items) >= 100 {
+		return ProviderOrder{}, ErrPurchaseConflict
+	}
+	var found ProviderOrder
+	for _, order := range result.Items {
+		if order.Receipt == receipt {
+			if found.ID != "" {
+				return ProviderOrder{}, ErrPurchaseConflict
+			}
+			found = order
+		}
+	}
+	if found.ID == "" {
+		return ProviderOrder{}, ErrNotFound
+	}
+	return found, nil
+}

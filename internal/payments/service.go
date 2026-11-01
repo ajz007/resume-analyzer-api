@@ -121,29 +121,35 @@ func (s *Service) CreateOrder(ctx context.Context, userID, analysisID, currency 
 		return Order{}, ErrAlreadyUnlocked
 	}
 
-	paymentID := uuid.NewString()
-	orderID, err := s.Orders.CreateOrder(ctx, amount, currency, paymentID, map[string]string{
-		"analysis_id": analysisID,
-		"payment_id":  paymentID,
-	})
+	now := time.Now().UTC()
+	p, creator, err := s.Repo.ReservePurchase(ctx, Payment{ID: uuid.NewString(), UserID: userID, AnalysisID: analysisID, AmountMinor: amount, Currency: currency, Status: StatusCreated, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		return Order{}, err
 	}
-	now := time.Now().UTC()
-	if err := s.Repo.Create(ctx, Payment{
-		ID:              paymentID,
-		UserID:          userID,
-		AnalysisID:      analysisID,
-		RazorpayOrderID: orderID,
-		AmountMinor:     amount,
-		Currency:        currency,
-		Status:          StatusCreated,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}); err != nil {
-		return Order{}, err
+	if p.Currency != currency {
+		return Order{}, ErrPurchaseCurrency
 	}
-	return Order{OrderID: orderID, Amount: amount, Currency: currency, KeyID: s.KeyID}, nil
+	if !creator {
+		p, err = s.recoverPurchase(ctx, p)
+		if err != nil {
+			return Order{}, err
+		}
+		if p.Status == StatusPaid {
+			return Order{}, ErrAlreadyUnlocked
+		}
+		return s.checkoutOrder(p), nil
+	}
+	// This reservation elects exactly one POST. Every failure after reservation is
+	// recovered by provider lookup, never by blindly repeating order creation.
+	orderID, err := s.Orders.CreateOrder(ctx, p.AmountMinor, p.Currency, p.ID, map[string]string{"analysis_id": p.AnalysisID, "payment_id": p.ID})
+	if err != nil {
+		return Order{}, fmt.Errorf("%w: %v", ErrPurchasePending, err)
+	}
+	p, err = s.Repo.AttachOrder(ctx, p, orderID)
+	if err != nil {
+		return Order{}, fmt.Errorf("%w: %v", ErrPurchasePending, err)
+	}
+	return s.checkoutOrder(p), nil
 }
 
 // VerifyCheckout confirms a payment from the Razorpay Checkout handler and unlocks the report.

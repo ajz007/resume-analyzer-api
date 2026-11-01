@@ -30,6 +30,7 @@ func NewHandler(svc *Service) *Handler {
 // RegisterRoutes attaches payment routes to the router group.
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/payments/config", h.getConfig)
+	rg.GET("/payments/purchases/:analysisId", h.recoverPurchase)
 	rg.POST("/payments/orders", h.createOrder)
 	rg.POST("/payments/verify", h.verify)
 	rg.POST("/payments/webhook", h.webhook)
@@ -71,6 +72,12 @@ func (h *Handler) createOrder(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrPaymentsDisabled):
 			respond.Error(c, http.StatusServiceUnavailable, "payments_disabled", err.Error(), nil)
+		case errors.Is(err, ErrPurchasePending):
+			respond.Error(c, http.StatusConflict, "purchase_pending", ErrPurchasePending.Error(), nil)
+		case errors.Is(err, ErrPurchaseCurrency):
+			respond.Error(c, http.StatusConflict, "purchase_currency", err.Error(), nil)
+		case errors.Is(err, ErrPurchaseClosed), errors.Is(err, ErrPurchaseConflict):
+			respond.Error(c, http.StatusConflict, "purchase_requires_support", err.Error(), nil)
 		case errors.Is(err, ErrInvalidCurrency):
 			respond.Error(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
 		case errors.Is(err, ErrAnalysisNotFound):
@@ -150,4 +157,24 @@ func (h *Handler) webhook(c *gin.Context) {
 		return
 	}
 	respond.JSON(c, http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) recoverPurchase(c *gin.Context) {
+	if isGuest(c) {
+		respond.Error(c, http.StatusUnauthorized, "login_required", ErrLoginRequired.Error(), nil)
+		return
+	}
+	state, err := h.Svc.RecoverPurchase(c.Request.Context(), middleware.UserIDFromContext(c), c.Param("analysisId"))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAnalysisNotFound):
+			respond.Error(c, http.StatusNotFound, "not_found", "analysis not found", nil)
+		case errors.Is(err, ErrPurchaseConflict):
+			respond.Error(c, http.StatusConflict, "purchase_requires_support", ErrPurchaseConflict.Error(), nil)
+		default:
+			respond.Error(c, http.StatusServiceUnavailable, "purchase_recovery_unavailable", "purchase status is temporarily unavailable", nil)
+		}
+		return
+	}
+	respond.JSON(c, http.StatusOK, state)
 }

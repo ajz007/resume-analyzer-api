@@ -14,7 +14,7 @@ Support English-speaking international users with the same core experience if th
 
 ### First increment: payment confirmation and paywall configuration
 
-Implemented on `codex/payment-resilience`, pending review and deployment:
+Merged in PR #29:
 
 - Confirm checkout signatures, ownership, provider payment ID, order ID, amount, currency and captured status before granting new access. Refunded payments must not create new access through checkout.
 - An authorized payment returns a recoverable pending result; retry verification of the existing payment rather than collecting payment again.
@@ -24,7 +24,17 @@ Implemented on `codex/payment-resilience`, pending review and deployment:
 
 This increment does NOT solve duplicate order creation, refund ordering or credit accounting. It adds a provider read to checkout verification; signed capture webhooks remain a recovery path.
 
-### Next payment increment
+### Purchase recovery increment
+
+Implemented on `codex/purchase-recovery`, pending review and deployment:
+
+- Persist a unique purchase before provider creation; repeated requests across processes reuse it.
+- Recover uncertain provider responses by exact receipt lookup, never a second blind order POST.
+- Recover captured payment/access without browser checkout proof; resume a ready order at its original currency and price.
+- Backfill legacy orders and require support for ambiguous historical duplicates. Adopt legacy orders saved between migration and code deployment.
+- PostgreSQL integration tests and browser recovery tests passed locally. See purchase-recovery.md for migration, rollout and operational limitations.
+
+### Remaining payment work
 
 - Reserve one active purchase per user/report in the database before creating an external order; concurrent requests reuse the purchase.
 - Reconcile uncertain provider responses against the reserved purchase. Never blindly retry an order creation after an ambiguous timeout. Specify what happens when the provider created an order but the local save failed.

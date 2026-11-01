@@ -20,6 +20,10 @@ const (
 )
 
 var (
+	ErrPurchasePending                = errors.New("an existing purchase is being confirmed; check its status before another payment")
+	ErrPurchaseClosed                 = errors.New("this purchase was refunded; contact support before purchasing this review again")
+	ErrPurchaseCurrency               = errors.New("a checkout already exists in another currency; resume that purchase instead")
+	ErrPurchaseConflict               = errors.New("purchase recovery requires support")
 	ErrPaymentNotCaptured             = errors.New("payment is not captured; check the existing payment again before attempting another purchase")
 	ErrPaymentMismatch                = errors.New("payment details do not match order")
 	ErrPaymentVerificationUnavailable = errors.New("payment confirmation is temporarily unavailable; check the existing payment again")
@@ -37,6 +41,7 @@ var (
 
 // Payment is a Razorpay order created to unlock one analysis report.
 type Payment struct {
+	NeedsSupport      bool // Ambiguous historical purchases must be reconciled before resuming checkout.
 	ID                string
 	UserID            string
 	AnalysisID        string

@@ -41,3 +41,31 @@ func TestVerifyHandlerReturnsRecoverablePaymentStates(t *testing.T) {
 		})
 	}
 }
+
+func TestPurchaseRecoveryEndpointOwnershipAndGuestProtection(t *testing.T) {
+	for _, tc := range []struct {
+		name, user string
+		guest      bool
+		status     int
+		body       string
+	}{
+		{"owner", "google:u1", false, 200, `"state":"none"`},
+		{"other owner", "google:other", false, 404, "not_found"},
+		{"guest", "guest:one", true, 401, "login_required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, provider := recoveryService()
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set("userId", tc.user); c.Set("isGuest", tc.guest); c.Next() })
+			NewHandler(svc).RegisterRoutes(router.Group("/api/v1"))
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/payments/purchases/a1", nil))
+			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			if provider.calls != 0 {
+				t.Fatal("status endpoint created provider order")
+			}
+		})
+	}
+}
