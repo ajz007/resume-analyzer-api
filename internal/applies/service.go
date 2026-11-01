@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/analyses"
 	"resume-backend/internal/documents"
 	"resume-backend/internal/generatedresumes"
@@ -98,7 +99,7 @@ func (s *Service) Apply(ctx context.Context, userID, analysisID, templateID stri
 		return generatedresumes.GeneratedResume{}, err
 	}
 
-	raw, err := s.LLM.Complete(ctx, prompt)
+	raw, err := s.LLM.Complete(aimeter.WithOperation(ctx, "apply", analysisID, ""), prompt)
 	if err != nil {
 		return generatedresumes.GeneratedResume{}, err
 	}

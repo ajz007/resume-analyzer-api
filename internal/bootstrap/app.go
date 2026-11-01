@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"resume-backend/internal/account"
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/analyses"
 	"resume-backend/internal/applies"
 	googleauth "resume-backend/internal/auth"
@@ -281,12 +282,17 @@ func buildServices(app *App) error {
 	if analysisModel == "" {
 		analysisModel = app.Config.LLMModel
 	}
+	var usageRecorder aimeter.Recorder
+	if app.DB != nil {
+		usageRecorder = &aimeter.PGRecorder{DB: app.DB}
+	}
 	llmClient := llm.Client(llm.PlaceholderClient{})
 	if app.Config.LLMProvider == "openai" {
 		openaiClient, err := openai.NewClient(os.Getenv("OPENAI_API_KEY"), analysisModel)
 		if err != nil {
 			return err
 		}
+		openaiClient.SetUsageRecorder(usageRecorder)
 		llmClient = openaiClient
 	}
 
@@ -296,6 +302,7 @@ func buildServices(app *App) error {
 		if err != nil {
 			return err
 		}
+		promptClient.SetUsageRecorder(usageRecorder)
 		applyLLMClient = promptClient
 	}
 

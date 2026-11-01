@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/llm"
 )
 
@@ -45,7 +46,7 @@ func (r retryingLLM) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) 
 		return nil, ctx.Err()
 	}
 
-	return r.base.AnalyzeResume(ctx, input)
+	return r.base.AnalyzeResume(aimeter.WithRetry(ctx, "transient"), input)
 }
 
 func shouldRetryLLM(err error) bool {
