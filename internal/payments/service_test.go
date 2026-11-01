@@ -64,8 +64,9 @@ func (f fakeAnalyses) GetAnalysisInfo(_ context.Context, id string) (AnalysisInf
 func newTestService() (*Service, *fakeOrders) {
 	orders := &fakeOrders{}
 	return &Service{
-		Repo:   NewMemoryRepo(),
-		Orders: orders,
+		Repo:     NewMemoryRepo(),
+		Orders:   orders,
+		Payments: fakePaymentFetcher{payment: ProviderPayment{ID: "pay_1", OrderID: "order_1", Amount: 49900, Currency: "INR", Status: "captured"}},
 		Analyses: fakeAnalyses{
 			"a1":      {ID: "a1", UserID: "google:u1", Status: "completed"},
 			"pending": {ID: "pending", UserID: "google:u1", Status: "processing"},
@@ -233,5 +234,110 @@ func TestRazorpayClientCreateOrder(t *testing.T) {
 	client.KeySecret = "wrong"
 	if _, err := client.CreateOrder(context.Background(), 49900, "INR", "receipt-1", nil); err == nil {
 		t.Fatalf("expected error on provider 401")
+	}
+}
+
+type fakePaymentFetcher struct {
+	payment ProviderPayment
+	err     error
+}
+
+func (f fakePaymentFetcher) FetchPayment(context.Context, string) (ProviderPayment, error) {
+	return f.payment, f.err
+}
+
+func TestVerifyCheckoutRequiresCapturedMatchingProviderPayment(t *testing.T) {
+	cases := []struct {
+		name        string
+		mutate      func(*ProviderPayment)
+		providerErr error
+		want        error
+	}{
+		{name: "authorized", mutate: func(p *ProviderPayment) { p.Status = "authorized" }, want: ErrPaymentNotCaptured},
+		{name: "failed", mutate: func(p *ProviderPayment) { p.Status = "failed" }, want: ErrPaymentNotCaptured},
+		{name: "refunded", mutate: func(p *ProviderPayment) { p.Status = "refunded" }, want: ErrPaymentNotCaptured},
+		{name: "partial refund", mutate: func(p *ProviderPayment) { p.AmountRefunded = 100 }, want: ErrPaymentNotCaptured},
+		{name: "wrong payment", mutate: func(p *ProviderPayment) { p.ID = "pay_other" }, want: ErrPaymentMismatch},
+		{name: "wrong order", mutate: func(p *ProviderPayment) { p.OrderID = "order_other" }, want: ErrPaymentMismatch},
+		{name: "wrong amount", mutate: func(p *ProviderPayment) { p.Amount = 1 }, want: ErrPaymentMismatch},
+		{name: "wrong currency", mutate: func(p *ProviderPayment) { p.Currency = "USD" }, want: ErrPaymentMismatch},
+		{name: "provider unavailable", providerErr: errors.New("timeout"), want: ErrPaymentVerificationUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newTestService()
+			ctx := context.Background()
+			order, err := svc.CreateOrder(ctx, "google:u1", "a1", "INR")
+			if err != nil {
+				t.Fatal(err)
+			}
+			payment := ProviderPayment{ID: "pay_1", OrderID: order.OrderID, Amount: 49900, Currency: "INR", Status: "captured"}
+			if tc.mutate != nil {
+				tc.mutate(&payment)
+			}
+			svc.Payments = fakePaymentFetcher{payment: payment, err: tc.providerErr}
+			sig := hmacHex([]byte(order.OrderID+"|pay_1"), testKeySecret)
+			if _, err := svc.VerifyCheckout(ctx, "google:u1", order.OrderID, "pay_1", sig); !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
+			}
+			p, _ := svc.Repo.GetByOrderID(ctx, order.OrderID)
+			if p.Status != StatusCreated {
+				t.Fatalf("state changed: %+v", p)
+			}
+			if unlocked, _ := svc.IsUnlocked(ctx, "google:u1", "a1"); unlocked {
+				t.Fatal("unverified payment unlocked report")
+			}
+		})
+	}
+}
+
+func TestVerifyCheckoutCanRetrySamePaymentAfterCapture(t *testing.T) {
+	svc, _ := newTestService()
+	ctx := context.Background()
+	order, _ := svc.CreateOrder(ctx, "google:u1", "a1", "INR")
+	p := ProviderPayment{ID: "pay_1", OrderID: order.OrderID, Amount: 49900, Currency: "INR", Status: "authorized"}
+	sig := hmacHex([]byte(order.OrderID+"|pay_1"), testKeySecret)
+	svc.Payments = fakePaymentFetcher{payment: p}
+	if _, err := svc.VerifyCheckout(ctx, "google:u1", order.OrderID, "pay_1", sig); !errors.Is(err, ErrPaymentNotCaptured) {
+		t.Fatal(err)
+	}
+	p.Status = "captured"
+	svc.Payments = fakePaymentFetcher{payment: p}
+	if got, err := svc.VerifyCheckout(ctx, "google:u1", order.OrderID, "pay_1", sig); err != nil || got.Status != StatusPaid {
+		t.Fatalf("retry: %+v %v", got, err)
+	}
+}
+
+func TestRazorpayFetchPayment(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		wantErr    bool
+	}{
+		{"captured", `{"id":"pay_1","order_id":"order_1","amount":49900,"currency":"INR","status":"captured","amount_refunded":0}`, 200, false},
+		{"unauthorized", `{}`, 401, true},
+		{"unavailable", `{}`, 503, true},
+		{"bad JSON", `{`, 200, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				user, pass, ok := r.BasicAuth()
+				if !ok || user != "key" || pass != "secret" || r.Method != "GET" || r.URL.Path != "/v1/payments/pay_1" {
+					t.Error("incorrect provider request")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client := NewRazorpayClient("key", "secret")
+			client.BaseURL = server.URL
+			p, err := client.FetchPayment(context.Background(), "pay_1")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tc.wantErr && (p.ID != "pay_1" || p.Amount != 49900 || p.OrderID != "order_1" || p.Status != "captured") {
+				t.Fatalf("incorrect decode: %+v", p)
+			}
+		})
 	}
 }

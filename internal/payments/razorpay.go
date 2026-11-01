@@ -10,14 +10,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 const razorpayDefaultBaseURL = "https://api.razorpay.com"
 
-// RazorpayClient calls the Razorpay Orders API. Only order creation is needed;
-// payment confirmation arrives via checkout signature or webhook.
+// RazorpayClient creates orders and fetches authoritative payment state.
 type RazorpayClient struct {
 	KeyID     string
 	KeySecret string
@@ -121,4 +121,38 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+// FetchPayment reads provider state without capturing or otherwise changing a payment.
+func (c *RazorpayClient) FetchPayment(ctx context.Context, paymentID string) (ProviderPayment, error) {
+	baseURL := strings.TrimRight(c.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = razorpayDefaultBaseURL
+	}
+	// Provider ids are single path segments, never paths or query strings.
+	if !strings.HasPrefix(paymentID, "pay_") || strings.ContainsAny(paymentID, "/?#%") {
+		return ProviderPayment{}, fmt.Errorf("invalid payment id")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/payments/"+url.PathEscape(paymentID), nil)
+	if err != nil {
+		return ProviderPayment{}, err
+	}
+	req.SetBasicAuth(c.KeyID, c.KeySecret)
+	client := c.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ProviderPayment{}, fmt.Errorf("razorpay fetch payment: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ProviderPayment{}, fmt.Errorf("razorpay fetch payment: status %d", resp.StatusCode)
+	}
+	var payment ProviderPayment
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payment); err != nil {
+		return ProviderPayment{}, fmt.Errorf("razorpay fetch payment: decode: %w", err)
+	}
+	return payment, nil
 }

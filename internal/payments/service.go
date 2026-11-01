@@ -23,10 +23,26 @@ type OrderCreator interface {
 	CreateOrder(ctx context.Context, amountMinor int64, currency, receipt string, notes map[string]string) (string, error)
 }
 
+// PaymentFetcher retrieves authoritative provider state before granting access.
+type PaymentFetcher interface {
+	FetchPayment(ctx context.Context, paymentID string) (ProviderPayment, error)
+}
+
+// ProviderPayment contains only fields needed to verify an entitlement.
+type ProviderPayment struct {
+	ID             string `json:"id"`
+	OrderID        string `json:"order_id"`
+	Amount         int64  `json:"amount"`
+	Currency       string `json:"currency"`
+	Status         string `json:"status"`
+	AmountRefunded int64  `json:"amount_refunded"`
+}
+
 // Service implements one-time report unlocks via Razorpay.
 type Service struct {
 	Repo          Repo
 	Orders        OrderCreator
+	Payments      PaymentFetcher
 	Analyses      AnalysisLookup
 	KeyID         string
 	KeySecret     string
@@ -144,6 +160,19 @@ func (s *Service) VerifyCheckout(ctx context.Context, userID, orderID, paymentID
 	}
 	if p.UserID != userID {
 		return Payment{}, ErrOrderUserMismatch
+	}
+	if s.Payments == nil {
+		return Payment{}, ErrPaymentsDisabled
+	}
+	confirmed, err := s.Payments.FetchPayment(ctx, paymentID)
+	if err != nil {
+		return Payment{}, fmt.Errorf("%w: %v", ErrPaymentVerificationUnavailable, err)
+	}
+	if confirmed.ID != paymentID || confirmed.OrderID != orderID || confirmed.Amount != p.AmountMinor || confirmed.Currency != p.Currency {
+		return Payment{}, ErrPaymentMismatch
+	}
+	if confirmed.Status != "captured" || confirmed.AmountRefunded != 0 {
+		return Payment{}, ErrPaymentNotCaptured
 	}
 	return s.Repo.MarkPaidAndUnlock(ctx, orderID, paymentID)
 }
