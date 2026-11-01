@@ -12,6 +12,16 @@ func (s *pgStore) ReserveAnalysis(ctx context.Context, userID, analysisID string
 		return Usage{}, err
 	}
 	defer tx.Rollback()
+	u, err := s.ReserveAnalysisTx(ctx, tx, userID, analysisID)
+	if err != nil {
+		return Usage{}, err
+	}
+	return u, tx.Commit()
+}
+
+// ReserveAnalysisTx admits a review inside the caller's job creation transaction.
+func (s *pgStore) ReserveAnalysisTx(ctx context.Context, tx *sql.Tx, userID, analysisID string) (Usage, error) {
+	var err error
 	// Serialize reservation with terminal status writes. Reuse does not recharge.
 	var owner, status string
 	err = tx.QueryRowContext(ctx, `SELECT user_id,status FROM analyses WHERE id=$1 FOR UPDATE`, analysisID).Scan(&owner, &status)
@@ -31,7 +41,7 @@ func (s *pgStore) ReserveAnalysis(ctx context.Context, userID, analysisID string
 		if reservedOwner != userID || state == "released" {
 			return Usage{}, ErrReservationConflict
 		}
-		return u, tx.Commit()
+		return u, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Usage{}, err
@@ -49,7 +59,7 @@ func (s *pgStore) ReserveAnalysis(ctx context.Context, userID, analysisID string
 		return Usage{}, err
 	}
 	u.Used++
-	return u, tx.Commit()
+	return u, nil
 }
 
 func (s *pgStore) SettleAnalysis(ctx context.Context, analysisID, status string) error {

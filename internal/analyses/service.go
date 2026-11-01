@@ -83,6 +83,9 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		return Analysis{}, err
 	}
 
+	if s.usesDurableJobs() {
+		return s.acceptedDurableAnalysis(ctx, analysis), nil
+	}
 	if s.Usage != nil {
 		if _, err := s.Usage.ReserveAnalysis(ctx, userID, analysis.ID); err != nil {
 			s.failAnalysis(ctx, analysis.ID, userID, documentID, err, nil)
@@ -148,6 +151,9 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 	if err != nil {
 		return createdAnalysis, false, err
 	}
+	if s.usesDurableJobs() {
+		return s.acceptedDurableAnalysis(ctx, createdAnalysis), created, nil
+	}
 	if created && s.Usage != nil {
 		if _, err := s.Usage.ReserveAnalysis(ctx, userID, createdAnalysis.ID); err != nil {
 			s.failAnalysis(ctx, createdAnalysis.ID, userID, documentID, err, nil)
@@ -212,29 +218,45 @@ func normalizeStorageProvider(provider string) string {
 
 // ProcessAnalysis executes analysis processing synchronously.
 func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, analysisExecutionBudget)
+	defer cancel()
+	claimed := false
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
-			s.failAnalysis(ctx, analysisID, "", "", err, nil)
+			if claimed {
+				s.failAnalysis(ctx, analysisID, "", "", err, nil)
+			}
 		}
 	}()
 
 	analysis, err := s.Repo.GetByID(ctx, analysisID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
 	if err != nil {
 		err = fmt.Errorf("analysis lookup: %w", err)
-		s.failAnalysis(ctx, analysisID, "", "", err, nil)
 		return err
 	}
 	if analysis.Status == StatusCompleted || analysis.Status == StatusFailed {
 		return nil
 	}
 
+	if s.usesDurableJobs() {
+		if expired, expireErr := s.Repo.(durableJobs).ExpireJob(ctx, analysisID); expireErr != nil {
+			return expireErr
+		} else if expired {
+			s.settleAnalysisUsage(analysisID)
+			return nil
+		}
+	}
 	startedAt := time.Now().UTC()
-	if err := s.Repo.UpdateStatusResultAndError(ctx, analysisID, StatusProcessing, nil, nil, nil, nil, &startedAt, nil); err != nil {
-		// THIS is the bug you're currently hiding
-		err = fmt.Errorf("set processing failed: %w", err)
-		s.failAnalysis(ctx, analysisID, "", "", err, &startedAt)
-		return err
+	claimed, err = s.Repo.ClaimProcessing(ctx, analysisID, startedAt)
+	if err != nil {
+		return fmt.Errorf("claim analysis: %w", err)
+	}
+	if !claimed {
+		return nil
 	}
 
 	metrics.IncAnalysisStarted()

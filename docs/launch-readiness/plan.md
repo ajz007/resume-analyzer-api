@@ -36,15 +36,13 @@ Merged in API PR #30 and UI PR #21:
 
 ### Remaining payment work
 
-- Reserve one active purchase per user/report in the database before creating an external order; concurrent requests reuse the purchase.
-- Reconcile uncertain provider responses against the reserved purchase. Never blindly retry an order creation after an ambiguous timeout. Specify what happens when the provider created an order but the local save failed.
 - Persist authenticated webhook events and refund facts, including events arriving before payment linkage. Make retries idempotent and establish an explicit partial-refund policy.
-- Reconcile pending purchases and expose a safe recovery state in the UI across refreshes and devices.
+- Add reviewed operator tooling for purchases that remain uncertain or contain historical duplicate orders.
 - Acceptance: concurrent checkout, response loss, database failure, reordered capture/refund, duplicate webhook and provider outage tests demonstrate at most one entitlement per intended purchase and no revoked payment reactivation. Prove database behavior with PostgreSQL integration tests.
 
 ### Failed-review allowance increment
 
-Implemented on `codex/review-credit-recovery`, pending review/deployment:
+Merged in API PR #31 and UI PR #22:
 
 - Reserve monthly allowance once per analysis UUID, commit delivered reviews, and release persisted failures once.
 - Recover an interrupted settlement on the next usage read/quota check; protect month/reset boundaries and the original billing owner.
@@ -52,12 +50,22 @@ Implemented on `codex/review-credit-recovery`, pending review/deployment:
 - Refresh the UI's server balance after technical/parse failures. No inferred legacy refunds, price/limit changes or purchased wallet.
 - PostgreSQL concurrency/lifecycle tests and service/UI regressions passed. See review-allowance-recovery.md for scope and rollout.
 
-### Remaining usage, dispatch and purchased-review accounting
+### Analysis job recovery increment
+
+Implemented on `codex/analysis-job-recovery`, pending review/deployment:
+
+- Commit analysis creation, allowance reservation and dispatch together in PostgreSQL; transient queue errors keep the same queued review accepted.
+- Lease dispatch attempts and use a single processing claim, preventing duplicate queue deliveries from executing the same analysis again.
+- Bound attempts to ten minutes; classify abandoned processing after twenty minutes and queued work after an hour as retryable failures, with established allowance recovery.
+- Recover on owner result reads and provide a bounded scheduled sweep. An optional infrastructure template is disabled by default; unattended recovery still requires schedule activation.
+- PostgreSQL failure/concurrency tests and worker event-contract tests passed. See analysis-job-recovery.md for migration, activation and rollback instructions.
+
+### Remaining purchased-review accounting and release validation
 
 - Extend the per-review monthly allowance ledger with separate purchased-credit balances. The current monthly counter and new reservation ledger are not a purchased wallet.
 - Preserve once-per-review reservation/settlement when adding purchased credits. A user-requested new job review is a new operation; reopening a result is not. Complete recovery for jobs that never reach a persisted terminal state.
-- Tie reservation, job creation and queue dispatch through a durable outbox so a queue failure cannot strand a charged review.
-- Add a conditional worker claim/lease so concurrent queue deliveries cannot generate the same report twice. Define recovery after a worker crashes during an uncertain provider call.
+- Validate the deployed outbox, worker claim, timeout recovery and schedule under controlled queue interruption before promotion.
+- Retain the explicit-retry policy for uncertain provider calls. Extend similar recovery guarantees to other AI job types when they enter the paid offer.
 - Preserve current balances and historical paid unlocks during migration. Do not reduce existing allowances without an explicit rollout decision.
 - Acceptance: parallel submissions, duplicate delivery, worker crash, exhausted quota, queue failure, first-user creation race and calendar rollover are tested against durable storage.
 

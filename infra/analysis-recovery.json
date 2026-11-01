@@ -1,0 +1,104 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Optional bounded analysis recovery for the existing Rethink Resume worker. Deploy disabled, validate, then enable.",
+  "Parameters": {
+    "WorkerFunctionArn": {
+      "Type": "String",
+      "Description": "Existing worker Lambda ARN in this account/region."
+    },
+    "WorkerRoleName": {
+      "Type": "String",
+      "Description": "Existing worker execution role name (not ARN)."
+    },
+    "QueueArn": {
+      "Type": "String",
+      "Description": "Existing analysis SQS queue ARN."
+    },
+    "ScheduleState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    }
+  },
+  "Resources": {
+    "RecoveryQueuePermission": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": {
+          "Ref": "AWS::StackName"
+        },
+        "Roles": [
+          {
+            "Ref": "WorkerRoleName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "sqs:SendMessage"
+              ],
+              "Resource": {
+                "Ref": "QueueArn"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "RecoveryRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Recover up to 25 queued or interrupted analyses per invocation.",
+        "ScheduleExpression": "rate(30 minutes)",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "WorkerFunctionArn"
+            },
+            "Id": "analysis-recovery",
+            "Input": "{\"type\":\"analysis_recovery\"}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 2,
+              "MaximumEventAgeInSeconds": 3600
+            }
+          }
+        ]
+      }
+    },
+    "RecoveryInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "WorkerFunctionArn"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "RecoveryRule",
+            "Arn"
+          ]
+        },
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "RecoveryRuleName": {
+      "Value": {
+        "Ref": "RecoveryRule"
+      }
+    }
+  }
+}

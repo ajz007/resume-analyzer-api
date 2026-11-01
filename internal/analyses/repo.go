@@ -7,6 +7,7 @@ import (
 
 // Repo defines persistence operations for analyses.
 type Repo interface {
+	ClaimProcessing(ctx context.Context, analysisID string, startedAt time.Time) (bool, error)
 	Create(ctx context.Context, analysis Analysis) error
 	GetOrCreateForDocument(ctx context.Context, analysis Analysis, allowRetry bool, allowCreate func() error) (Analysis, bool, error)
 	GetByID(ctx context.Context, analysisID string) (Analysis, error)

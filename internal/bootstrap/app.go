@@ -270,7 +270,9 @@ func buildServices(app *App) error {
 
 	var usageSvc *usage.Service
 	if app.DB != nil {
-		usageSvc = usage.NewPostgresService(usage.NewPGStore(app.DB))
+		pgUsage := usage.NewPGStore(app.DB)
+		usageSvc = usage.NewPostgresService(pgUsage)
+		analysisRepo.(*analyses.PGRepo).Reservations = pgUsage
 	} else {
 		usageSvc = usage.NewService()
 	}

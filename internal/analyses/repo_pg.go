@@ -6,11 +6,31 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"resume-backend/internal/usage"
 )
+
+// AnalysisReserver admits an analysis in the same transaction as its creation.
+type AnalysisReserver interface {
+	ReserveAnalysisTx(context.Context, *sql.Tx, string, string) (usage.Usage, error)
+}
 
 // PGRepo implements Repo using Postgres.
 type PGRepo struct {
-	DB *sql.DB
+	DB           *sql.DB
+	Reservations AnalysisReserver
+}
+
+func (r *PGRepo) DurableJobs() bool { return r.Reservations != nil }
+func (r *PGRepo) admitWithTx(ctx context.Context, tx *sql.Tx, a Analysis) error {
+	if r.Reservations == nil {
+		return nil
+	}
+	if _, err := r.Reservations.ReserveAnalysisTx(ctx, tx, a.UserID, a.ID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO analysis_dispatch(analysis_id,request_id,created_at) VALUES($1,$2,$3)`, a.ID, requestIDFromContext(ctx), a.CreatedAt)
+	return err
 }
 
 // GetOrCreateForDocument returns the latest analysis for a document or creates a new one.
@@ -67,6 +87,9 @@ func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, 
 	if err := createWithTx(ctx, tx, analysis); err != nil {
 		return Analysis{}, false, err
 	}
+	if err := r.admitWithTx(ctx, tx, analysis); err != nil {
+		return Analysis{}, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Analysis{}, false, err
 	}
@@ -75,6 +98,20 @@ func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, 
 
 // Create inserts a new analysis.
 func (r *PGRepo) Create(ctx context.Context, analysis Analysis) error {
+	if r.DurableJobs() {
+		tx, err := r.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := createWithTx(ctx, tx, analysis); err != nil {
+			return err
+		}
+		if err := r.admitWithTx(ctx, tx, analysis); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	const query = `
 INSERT INTO analyses (
 	id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
@@ -816,4 +853,14 @@ func (r *PGRepo) finalizedOrNotFound(ctx context.Context, analysisID string) err
 		return ErrAnalysisFinalized
 	}
 	return ErrNotFound
+}
+
+func (r *PGRepo) ClaimProcessing(ctx context.Context, id string, startedAt time.Time) (bool, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE analyses a SET status='processing',started_at=$2,updated_at=now() WHERE a.id=$1 AND a.status='queued' AND a.started_at IS NULL AND a.deleted_at IS NULL
+ AND (NOT $3::boolean OR EXISTS(SELECT 1 FROM analysis_usage_reservations u WHERE u.analysis_id=a.id AND u.state='reserved'))`, id, startedAt, r.DurableJobs())
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }
