@@ -20,20 +20,22 @@ import (
 	"resume-backend/internal/uploads"
 	"resume-backend/internal/usage"
 	"resume-backend/internal/users"
+	"resume-backend/internal/workspace"
 )
 
 // RouterDeps contains prebuilt dependencies for router wiring.
 type RouterDeps struct {
-	Config          config.Config
-	AccountHandler  *account.Handler
-	AnalysisHandler *analyses.Handler
-	ApplyHandler    *applies.Handler
-	DocumentHandler *documents.Handler
-	UsageHandler    *usage.Handler
-	PaymentsHandler *payments.Handler
-	ResumesHandler  *resumes.Handler
-	UserHandler     *users.Handler
-	GoogleAuth      *googleauth.GoogleService
+	WorkspaceHandler *workspace.Handler
+	Config           config.Config
+	AccountHandler   *account.Handler
+	AnalysisHandler  *analyses.Handler
+	ApplyHandler     *applies.Handler
+	DocumentHandler  *documents.Handler
+	UsageHandler     *usage.Handler
+	PaymentsHandler  *payments.Handler
+	ResumesHandler   *resumes.Handler
+	UserHandler      *users.Handler
+	GoogleAuth       *googleauth.GoogleService
 }
 
 // NewRouter constructs the Gin engine with middleware and routes registered.
@@ -68,6 +70,9 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 	deps.GoogleAuth.RegisterRoutes(api)
 	uploads.RegisterRoutes(api)
 	deps.DocumentHandler.RegisterRoutes(api)
+	if deps.WorkspaceHandler != nil {
+		deps.WorkspaceHandler.RegisterRoutes(api)
+	}
 	deps.AccountHandler.RegisterRoutes(api)
 	deps.AnalysisHandler.RegisterRoutes(api)
 	deps.UserHandler.RegisterRoutes(api)
