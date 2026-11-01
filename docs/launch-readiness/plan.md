@@ -26,7 +26,7 @@ This increment does NOT solve duplicate order creation, refund ordering or credi
 
 ### Purchase recovery increment
 
-Implemented on `codex/purchase-recovery`, pending review and deployment:
+Merged in API PR #30 and UI PR #21:
 
 - Persist a unique purchase before provider creation; repeated requests across processes reuse it.
 - Recover uncertain provider responses by exact receipt lookup, never a second blind order POST.
@@ -54,8 +54,8 @@ Implemented on `codex/review-credit-recovery`, pending review/deployment:
 
 ### Remaining usage, dispatch and purchased-review accounting
 
-- Create a durable credit ledger with separate free allowances and purchased credits. Current monthly usage counters are not a purchased wallet.
-- Reserve a credit once per review; commit it on successful delivery. Release it exactly once on technical failure. A user-requested new job review is a new operation; reopening a result is not.
+- Extend the per-review monthly allowance ledger with separate purchased-credit balances. The current monthly counter and new reservation ledger are not a purchased wallet.
+- Preserve once-per-review reservation/settlement when adding purchased credits. A user-requested new job review is a new operation; reopening a result is not. Complete recovery for jobs that never reach a persisted terminal state.
 - Tie reservation, job creation and queue dispatch through a durable outbox so a queue failure cannot strand a charged review.
 - Add a conditional worker claim/lease so concurrent queue deliveries cannot generate the same report twice. Define recovery after a worker crashes during an uncertain provider call.
 - Preserve current balances and historical paid unlocks during migration. Do not reduce existing allowances without an explicit rollout decision.
