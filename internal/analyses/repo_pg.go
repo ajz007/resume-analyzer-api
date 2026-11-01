@@ -403,7 +403,7 @@ SET status = $1,
         ELSE completed_at
     END,
     updated_at = now()
-WHERE id = $8::uuid`
+WHERE id = $8::uuid AND status NOT IN ('completed','failed')`
 
 	var payload any
 	var err error
@@ -419,7 +419,7 @@ WHERE id = $8::uuid`
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+		return r.finalizedOrNotFound(ctx, analysisID)
 	}
 	return nil
 }
@@ -455,7 +455,7 @@ SET analysis_result = $1::jsonb,
     status = 'completed',
     completed_at = COALESCE($2::timestamptz, completed_at),
     updated_at = now()
-WHERE id = $3::uuid`
+WHERE id = $3::uuid AND status NOT IN ('completed','failed')`
 
 	payload, err := marshalJSONB(result)
 	if err != nil {
@@ -466,7 +466,7 @@ WHERE id = $3::uuid`
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+		return r.finalizedOrNotFound(ctx, analysisID)
 	}
 	return nil
 }
@@ -805,4 +805,15 @@ LIMIT 1`
 
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (r *PGRepo) finalizedOrNotFound(ctx context.Context, analysisID string) error {
+	var exists bool
+	if err := r.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM analyses WHERE id=$1)`, analysisID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return ErrAnalysisFinalized
+	}
+	return ErrNotFound
 }

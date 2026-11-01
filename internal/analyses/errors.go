@@ -3,6 +3,7 @@ package analyses
 import "errors"
 
 var (
+	ErrAnalysisFinalized     = errors.New("analysis already finalized")
 	ErrNotFound              = errors.New("not found")
 	ErrForbidden             = errors.New("forbidden")
 	ErrShareNotFound         = errors.New("share not found")

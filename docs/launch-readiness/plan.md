@@ -42,7 +42,17 @@ Implemented on `codex/purchase-recovery`, pending review and deployment:
 - Reconcile pending purchases and expose a safe recovery state in the UI across refreshes and devices.
 - Acceptance: concurrent checkout, response loss, database failure, reordered capture/refund, duplicate webhook and provider outage tests demonstrate at most one entitlement per intended purchase and no revoked payment reactivation. Prove database behavior with PostgreSQL integration tests.
 
-### Usage and purchased-review accounting
+### Failed-review allowance increment
+
+Implemented on `codex/review-credit-recovery`, pending review/deployment:
+
+- Reserve monthly allowance once per analysis UUID, commit delivered reviews, and release persisted failures once.
+- Recover an interrupted settlement on the next usage read/quota check; protect month/reset boundaries and the original billing owner.
+- Persist returned queue errors as failed and prevent late callbacks from reversing terminal outcomes.
+- Refresh the UI's server balance after technical/parse failures. No inferred legacy refunds, price/limit changes or purchased wallet.
+- PostgreSQL concurrency/lifecycle tests and service/UI regressions passed. See review-allowance-recovery.md for scope and rollout.
+
+### Remaining usage, dispatch and purchased-review accounting
 
 - Create a durable credit ledger with separate free allowances and purchased credits. Current monthly usage counters are not a purchased wallet.
 - Reserve a credit once per review; commit it on successful delivery. Release it exactly once on technical failure. A user-requested new job review is a new operation; reopening a result is not.

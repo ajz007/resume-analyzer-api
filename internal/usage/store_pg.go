@@ -80,7 +80,8 @@ ON CONFLICT (user_id) DO UPDATE SET
     plan = EXCLUDED.plan,
     limit_amount = EXCLUDED.limit_amount,
     used = 0,
-    resets_at = EXCLUDED.resets_at`, userID, plan, limit, resetsAt); err != nil {
+    resets_at = EXCLUDED.resets_at,
+ usage_epoch = usage.usage_epoch + 1`, userID, plan, limit, resetsAt); err != nil {
 		return Usage{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -227,20 +228,14 @@ func (s *pgStore) ensure(ctx context.Context, userID string) (Usage, error) {
 }
 
 func (s *pgStore) lockAndEnsure(ctx context.Context, tx *sql.Tx, userID string) (Usage, error) {
+
+	defaults := defaultUsage(userID)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO usage(user_id,plan,limit_amount,used,resets_at) VALUES($1,$2,$3,0,$4) ON CONFLICT(user_id) DO NOTHING`, userID, defaults.Plan, defaults.Limit, defaults.ResetsAt); err != nil {
+		return Usage{}, err
+	}
 	var u Usage
-	row := tx.QueryRowContext(ctx, `
-SELECT plan, limit_amount, used, resets_at FROM usage WHERE user_id = $1 FOR UPDATE`, userID)
-	err := row.Scan(&u.Plan, &u.Limit, &u.Used, &u.ResetsAt)
+	err := tx.QueryRowContext(ctx, `SELECT plan,limit_amount,used,resets_at,usage_epoch FROM usage WHERE user_id=$1 FOR UPDATE`, userID).Scan(&u.Plan, &u.Limit, &u.Used, &u.ResetsAt, &u.Epoch)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			u = defaultUsage(userID)
-			if _, err = tx.ExecContext(ctx, `
-INSERT INTO usage (user_id, plan, limit_amount, used, resets_at) VALUES ($1, $2, $3, $4, $5)`,
-				userID, u.Plan, u.Limit, u.Used, u.ResetsAt); err != nil {
-				return Usage{}, err
-			}
-			return u, nil
-		}
 		return Usage{}, err
 	}
 
@@ -258,6 +253,7 @@ INSERT INTO usage (user_id, plan, limit_amount, used, resets_at) VALUES ($1, $2,
 	}
 	if now.After(u.ResetsAt) || now.Equal(u.ResetsAt) {
 		u.Used = 0
+		u.Epoch++
 		u.ResetsAt = nextMonthlyReset(now)
 		needsUpdate = true
 	} else if needsUpdate {
@@ -266,10 +262,10 @@ INSERT INTO usage (user_id, plan, limit_amount, used, resets_at) VALUES ($1, $2,
 	if needsUpdate {
 		if _, err = tx.ExecContext(ctx, `
 UPDATE usage
-SET plan = $1, limit_amount = $2, used = $3, resets_at = $4
-WHERE user_id = $5`, u.Plan, u.Limit, u.Used, u.ResetsAt, userID); err != nil {
+SET plan = $1, limit_amount = $2, used = $3, resets_at = $4, usage_epoch = $6
+WHERE user_id = $5`, u.Plan, u.Limit, u.Used, u.ResetsAt, userID, u.Epoch); err != nil {
 			return Usage{}, err
 		}
 	}
-	return u, nil
+	return s.reconcileReservations(ctx, tx, userID, u)
 }

@@ -50,6 +50,9 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 	if documentID == "" || userID == "" {
 		return Analysis{}, errors.New("documentID and userID are required")
 	}
+	if s.JobQueue == nil {
+		return Analysis{}, ErrJobQueueNotConfigured
+	}
 	promptVersion = NormalizePromptVersion(promptVersion)
 
 	if s.Usage != nil {
@@ -81,14 +84,12 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 	}
 
 	if s.Usage != nil {
-		if _, err := s.Usage.Consume(ctx, userID, 1); err != nil {
+		if _, err := s.Usage.ReserveAnalysis(ctx, userID, analysis.ID); err != nil {
+			s.failAnalysis(ctx, analysis.ID, userID, documentID, err, nil)
 			return Analysis{}, err
 		}
 	}
 
-	if s.JobQueue == nil {
-		return Analysis{}, ErrJobQueueNotConfigured
-	}
 	if err := s.JobQueue.Send(ctx, queue.Message{
 		Type:       queue.MessageTypeAnalysis,
 		AnalysisID: analysis.ID,
@@ -96,6 +97,7 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 		EnqueuedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Version:    1,
 	}); err != nil {
+		s.failAnalysis(ctx, analysis.ID, userID, documentID, err, nil)
 		return Analysis{}, err
 	}
 
@@ -126,9 +128,11 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 		CreatedAt:       time.Now().UTC(),
 	}
 
-	var allowCreate func() error
-	if s.Usage != nil {
-		allowCreate = func() error {
+	allowCreate := func() error {
+		if s.JobQueue == nil {
+			return ErrJobQueueNotConfigured
+		}
+		if s.Usage != nil {
 			ok, _, err := s.Usage.CanConsume(ctx, userID, 1)
 			if err != nil {
 				return err
@@ -136,8 +140,8 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 			if !ok {
 				return usage.ErrLimitReached
 			}
-			return nil
 		}
+		return nil
 	}
 
 	createdAnalysis, created, err := s.Repo.GetOrCreateForDocument(ctx, analysis, allowRetry, allowCreate)
@@ -145,14 +149,12 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 		return createdAnalysis, false, err
 	}
 	if created && s.Usage != nil {
-		if _, err := s.Usage.Consume(ctx, userID, 1); err != nil {
+		if _, err := s.Usage.ReserveAnalysis(ctx, userID, createdAnalysis.ID); err != nil {
+			s.failAnalysis(ctx, createdAnalysis.ID, userID, documentID, err, nil)
 			return createdAnalysis, false, err
 		}
 	}
 	if created {
-		if s.JobQueue == nil {
-			return createdAnalysis, created, ErrJobQueueNotConfigured
-		}
 		if err := s.JobQueue.Send(ctx, queue.Message{
 			Type:       queue.MessageTypeAnalysis,
 			AnalysisID: createdAnalysis.ID,
@@ -160,6 +162,7 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 			EnqueuedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Version:    1,
 		}); err != nil {
+			s.failAnalysis(ctx, createdAnalysis.ID, userID, documentID, err, nil)
 			return createdAnalysis, created, err
 		}
 	}
@@ -503,6 +506,7 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 		s.failAnalysis(ctx, analysisID, analysis.UserID, analysis.DocumentID, err, &startedAt)
 		return err
 	}
+	s.settleAnalysisUsage(analysisID)
 	metrics.IncAnalysisCompleted()
 	metrics.ObserveAnalysisDurationMs(durationMs(&startedAt, &completedAt))
 	telemetry.Info("analysis.status", map[string]any{
@@ -525,9 +529,17 @@ func (s *Service) failAnalysis(ctx context.Context, analysisID, userID, document
 	code, retryable := classifyFailure(err)
 	msg := sanitizeError(err)
 	completedAt := time.Now().UTC()
-	if updateErr := s.Repo.UpdateStatusResultAndError(context.Background(), analysisID, StatusFailed, nil, &code, &msg, &retryable, nil, &completedAt); updateErr != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if updateErr := s.Repo.UpdateStatusResultAndError(cleanupCtx, analysisID, StatusFailed, nil, &code, &msg, &retryable, nil, &completedAt); updateErr != nil {
+		s.settleAnalysisUsage(analysisID)
+		if errors.Is(updateErr, ErrAnalysisFinalized) {
+			return
+		}
 		fmt.Printf("failAnalysis: update failed id=%s err=%v orig=%v\n", analysisID, updateErr, err)
+		return
 	}
+	s.settleAnalysisUsage(analysisID)
 	metrics.IncAnalysisFailed()
 	if startedAt != nil {
 		metrics.ObserveAnalysisDurationMs(durationMs(startedAt, &completedAt))
@@ -561,9 +573,17 @@ func (s *Service) failParseAnalysis(ctx context.Context, analysis Analysis, doc 
 	retryable := false
 	result := parseIssueResult(issue)
 	completedAt := time.Now().UTC()
-	if updateErr := s.Repo.UpdateStatusResultAndError(context.Background(), analysis.ID, StatusFailed, result, &code, &msg, &retryable, nil, &completedAt); updateErr != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if updateErr := s.Repo.UpdateStatusResultAndError(cleanupCtx, analysis.ID, StatusFailed, result, &code, &msg, &retryable, nil, &completedAt); updateErr != nil {
+		s.settleAnalysisUsage(analysis.ID)
+		if errors.Is(updateErr, ErrAnalysisFinalized) {
+			return
+		}
 		fmt.Printf("failParseAnalysis: update failed id=%s err=%v orig=%v\n", analysis.ID, updateErr, issue)
+		return
 	}
+	s.settleAnalysisUsage(analysis.ID)
 	metrics.IncAnalysisFailed()
 	if startedAt != nil {
 		metrics.ObserveAnalysisDurationMs(durationMs(startedAt, &completedAt))
@@ -845,5 +865,20 @@ func normalizeStringArray(container map[string]any, key string) {
 		}
 		sort.Strings(out)
 		container[key] = out
+	}
+}
+
+func (s *Service) settleAnalysisUsage(analysisID string) {
+	if s.Usage == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	persisted, err := s.Repo.GetByID(ctx, analysisID)
+	if err == nil {
+		err = s.Usage.SettleAnalysis(ctx, analysisID, persisted.Status)
+	}
+	if err != nil {
+		telemetry.Info("analysis.usage.settlement_pending", map[string]any{"analysis_id": analysisID, "error": err.Error()})
 	}
 }

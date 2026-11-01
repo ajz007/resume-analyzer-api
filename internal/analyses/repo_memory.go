@@ -215,6 +215,9 @@ func (r *MemoryRepo) UpdateStatusResultAndError(ctx context.Context, analysisID,
 	if !ok {
 		return ErrNotFound
 	}
+	if analysis.Status == StatusCompleted || analysis.Status == StatusFailed {
+		return ErrAnalysisFinalized
+	}
 	analysis.Status = status
 	if result != nil {
 		analysis.Result = result
@@ -294,6 +297,9 @@ func (r *MemoryRepo) UpdateAnalysisResult(ctx context.Context, analysisID string
 	analysis, ok := r.byID[analysisID]
 	if !ok {
 		return ErrNotFound
+	}
+	if analysis.Status == StatusCompleted || analysis.Status == StatusFailed {
+		return ErrAnalysisFinalized
 	}
 	if result != nil {
 		analysis.Result = result

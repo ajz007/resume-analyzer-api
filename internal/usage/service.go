@@ -7,6 +7,8 @@ import (
 )
 
 type store interface {
+	ReserveAnalysis(ctx context.Context, userID, analysisID string) (Usage, error)
+	SettleAnalysis(ctx context.Context, analysisID, status string) error
 	Get(ctx context.Context, userID string) (Usage, error)
 	EnsurePeriod(ctx context.Context, userID string) (Usage, error)
 	Consume(ctx context.Context, userID string, n int) (Usage, error)
@@ -90,4 +92,14 @@ func (s *Service) CreateDocumentVersion(ctx context.Context, version DocumentVer
 // BuildApplyPlan generates an ApplyPlan from analysis results.
 func (s *Service) BuildApplyPlan(analysis resumeservice.AnalysisResultV2_3) resumeservice.ApplyPlan {
 	return resumeservice.BuildApplyPlan(analysis)
+}
+
+// ReserveAnalysis counts a specific review once, including repeated submissions.
+func (s *Service) ReserveAnalysis(ctx context.Context, userID, analysisID string) (Usage, error) {
+	return s.store.ReserveAnalysis(ctx, userID, analysisID)
+}
+
+// SettleAnalysis commits delivered work or releases a failed review's original allowance.
+func (s *Service) SettleAnalysis(ctx context.Context, analysisID, status string) error {
+	return s.store.SettleAnalysis(ctx, analysisID, status)
 }
