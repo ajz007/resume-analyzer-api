@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/shared/telemetry"
 	modelv1 "resume-backend/resume/modelv1"
 )
@@ -92,7 +93,15 @@ func (s *Service) completeGenerationOnce(ctx context.Context, req GenerateReques
 		"duration_ms": 0.0,
 		"phase":       phase,
 	}))
-	raw, err := s.LLM.Complete(ctx, prompt)
+	stage := "primary"
+	if strings.HasPrefix(phase, "retry") {
+		stage = "validation_repair"
+	}
+	callCtx := aimeter.WithStage(ctx, stage)
+	if strings.HasSuffix(phase, "_retry") {
+		callCtx = aimeter.WithRetry(callCtx, "timeout")
+	}
+	raw, err := s.LLM.Complete(callCtx, prompt)
 	if err != nil {
 		fields := generationLogFields(ctx, req, map[string]any{
 			"duration_ms": durationMilliseconds(time.Since(llmStart)),

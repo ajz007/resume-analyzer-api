@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"resume-backend/internal/aimeter"
 	modelv1 "resume-backend/resume/modelv1"
 )
 
@@ -80,6 +81,7 @@ func (s *Service) Generate(ctx context.Context, ownerID string, req GenerateRequ
 	if s.LLM == nil {
 		return GenerateResult{}, errors.New("llm prompt client not configured")
 	}
+	ctx = aimeter.WithOperation(ctx, "resume_generation", "", generationJobIDFromContext(ctx))
 	plan, err := s.generatePlan(ctx, req)
 	if err != nil {
 		return GenerateResult{}, err

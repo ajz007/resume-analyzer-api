@@ -52,7 +52,7 @@ Merged in API PR #31 and UI PR #22:
 
 ### Analysis job recovery increment
 
-Implemented on `codex/analysis-job-recovery`, pending review/deployment:
+Merged in API PR #32; scheduled resources remain undeployed by the owner's current choice:
 
 - Commit analysis creation, allowance reservation and dispatch together in PostgreSQL; transient queue errors keep the same queued review accepted.
 - Lease dispatch attempts and use a single processing claim, preventing duplicate queue deliveries from executing the same analysis again.
@@ -70,6 +70,18 @@ Implemented on `codex/analysis-job-recovery`, pending review/deployment:
 - Acceptance: parallel submissions, duplicate delivery, worker crash, exhausted quota, queue failure, first-user creation race and calendar rollover are tested against durable storage.
 
 ## 2. Bound and measure AI spending — required before changing the free offer
+
+### Measurement increment
+
+Implemented on `codex/ai-usage-ledger`, pending review/deployment:
+
+- Record each provider HTTP attempt, including retries/repairs and failed/invalid outputs, with internal operation/review identifiers.
+- Preserve missing, interrupted and unpriced usage explicitly. Add versioned standard-global GPT-6.1 Sol reference estimates and private read-only coverage/cost reports.
+- Use existing PostgreSQL and normal requests only. No new AWS resources, schedules, public cost endpoint, environment variables or paid experiments.
+- Measurement is best effort and does not enforce a budget. Check coverage/gap logs before using measured means/P95 to price the offer.
+- See ai-usage-measurement.md and ai-usage-reports.sql for deployment, rate assumptions, validation and operator queries.
+
+### Remaining spending controls and validation
 
 - Record provider/model, operation, input/output tokens, latency, retries and known/unknown cost for each review and answer; exclude resume text and personal details from cost logs.
 - Set explicit output, input/document and clarification limits on every AI path, including optional generation/tailoring paths. Count repair attempts and retries in the same operation budget.

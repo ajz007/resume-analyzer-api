@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"resume-backend/internal/aimeter"
 )
 
 // PromptClient implements prompt completion for JSON outputs.
@@ -46,6 +48,7 @@ func NewPromptClient(apiKey, model string) (*PromptClient, error) {
 
 // Complete returns the raw model response for the prompt.
 func (c *PromptClient) Complete(ctx context.Context, prompt string) (string, error) {
+	ctx = aimeter.EnsureOperation(ctx)
 	if strings.TrimSpace(c.model) == "" {
 		return "", fmt.Errorf("LLM_MODEL is required for OpenAI")
 	}
@@ -112,4 +115,12 @@ func (c *PromptClient) Complete(ctx context.Context, prompt string) (string, err
 		return "", fmt.Errorf("openai response empty content")
 	}
 	return content, nil
+}
+
+// SetUsageRecorder must be configured before the client is used concurrently.
+func (c *PromptClient) SetUsageRecorder(recorder aimeter.Recorder) {
+	if recorder == nil {
+		return
+	}
+	c.httpClient.Transport = aimeter.NewTransport(c.httpClient.Transport, recorder, c.model)
 }

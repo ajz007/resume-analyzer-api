@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"resume-backend/internal/aimeter"
 	modelv1 "resume-backend/resume/modelv1"
 )
 
@@ -58,7 +59,7 @@ func (s *Service) Tailor(ctx context.Context, ownerID, resumeID string, req Tail
 		return TailorResult{}, ValidationError{Errors: errs}
 	}
 
-	raw, err := s.LLM.Complete(ctx, buildTailoringPrompt(source.CurrentResume, req))
+	raw, err := s.LLM.Complete(aimeter.WithOperation(ctx, "resume_tailoring", "", resumeID), buildTailoringPrompt(source.CurrentResume, req))
 	if err != nil {
 		return TailorResult{}, err
 	}

@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/llm"
 	"resume-backend/internal/queue"
 )
@@ -281,7 +283,7 @@ func (s *Service) finishReviewAnswer(ctx context.Context, analysis Analysis, sou
 		payload, _ := json.Marshal(map[string]any{"resume": canonicalReviewSource(source).Text, "jobDescription": analysis.JobDescription, "requirement": requirement, "question": question, "candidateAnswer": req.Answer, "existingEdits": report.Edits, "existingSections": report.Sections})
 		schema, _ := json.Marshal(strictTypeSchema(reflect.TypeOf(ReviewDelta{})))
 		var raw json.RawMessage
-		raw, err = client.ReviseReview(ctx, llm.ReviewRevisionInput{SystemPrompt: reviewRevisionPrompt, Payload: string(payload), ResponseSchema: schema})
+		raw, err = client.ReviseReview(aimeter.WithOperation(ctx, "review_answer", analysis.ID, req.RequestID), llm.ReviewRevisionInput{SystemPrompt: reviewRevisionPrompt, Payload: string(payload), ResponseSchema: schema})
 		if err == nil {
 			decoder := json.NewDecoder(strings.NewReader(string(raw)))
 			decoder.DisallowUnknownFields()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/documents"
 	"resume-backend/internal/extract"
 	"resume-backend/internal/llm"
@@ -259,6 +260,7 @@ func (s *Service) ProcessAnalysis(ctx context.Context, analysisID string) (err e
 		return nil
 	}
 
+	ctx = aimeter.WithOperation(ctx, "analysis", analysis.ID, "")
 	metrics.IncAnalysisStarted()
 	telemetry.Info("analysis.status", map[string]any{
 		"request_id":        requestIDFromContext(ctx),

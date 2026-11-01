@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/llm"
 )
 
@@ -107,6 +108,12 @@ type chatResponse struct {
 }
 
 func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (json.RawMessage, error) {
+	ctx = aimeter.EnsureOperation(ctx)
+	if _, fix := llm.FixJSONFromContext(ctx); fix {
+		ctx = aimeter.WithStage(ctx, "json_repair")
+	} else if _, repair := llm.ExtraSystemMessageFromContext(ctx); repair {
+		ctx = aimeter.WithStage(ctx, "validation_repair")
+	}
 	if strings.TrimSpace(c.model) == "" {
 		return nil, fmt.Errorf("LLM_MODEL is required for OpenAI")
 	}
@@ -134,7 +141,7 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 	}
 
 	fixMessages := BuildFixPrompt(input.PromptVersion, input.JobDescription, c.model, raw)
-	raw, usage, err = c.analyzeOnce(ctx, input, fixMessages)
+	raw, usage, err = c.analyzeOnce(aimeter.WithStage(ctx, "json_repair"), input, fixMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +154,7 @@ func (c *Client) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) (jso
 
 func (c *Client) analyzeFixJSON(ctx context.Context, input llm.AnalyzeInput, raw string) (json.RawMessage, error) {
 	fixMessages := BuildFixPrompt(input.PromptVersion, input.JobDescription, c.model, []byte(raw))
-	rawResp, usage, err := c.analyzeOnce(ctx, input, fixMessages)
+	rawResp, usage, err := c.analyzeOnce(aimeter.WithStage(ctx, "json_repair"), input, fixMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +240,7 @@ func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput
 	if parsed.Error != nil {
 		if allowRetry && tempSent && isTempUnsupportedError(parsed.Error.Message) {
 			logTemperatureDecision(c.model, false, temp, true)
-			return c.analyzeOnceWithTemp(ctx, input, messages, 0, false, true)
+			return c.analyzeOnceWithTemp(aimeter.WithRetry(ctx, "parameter"), input, messages, 0, false, true)
 		}
 		return nil, nil, fmt.Errorf("openai http status %d: %s (%s)", resp.StatusCode, parsed.Error.Message, parsed.Error.Type)
 	}
@@ -347,10 +354,19 @@ var _ llm.Client = (*Client)(nil)
 
 // ReviseReview uses an isolated delta prompt, not the full-analysis prompt or repair.
 func (c *Client) ReviseReview(ctx context.Context, input llm.ReviewRevisionInput) (json.RawMessage, error) {
+	ctx = aimeter.EnsureOperation(ctx)
 	messages := []Message{{Role: "system", Content: input.SystemPrompt}, {Role: "user", Content: input.Payload}}
 	raw, usage, err := c.analyzeOnce(ctx, llm.AnalyzeInput{PromptVersion: "review-answer-v1", ResponseSchema: input.ResponseSchema, MaxCompletionTokens: 8192}, messages)
 	if err == nil {
 		logUsage(c.model, "review-answer-v1", usage)
 	}
 	return raw, err
+}
+
+// SetUsageRecorder must be configured before the client is used concurrently.
+func (c *Client) SetUsageRecorder(recorder aimeter.Recorder) {
+	if recorder == nil {
+		return
+	}
+	c.httpClient.Transport = aimeter.NewTransport(c.httpClient.Transport, recorder, c.model)
 }
