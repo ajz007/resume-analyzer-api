@@ -422,3 +422,29 @@ func shareOwnerMatches(share AnalysisShare, ownerUserID *string, ownerGuestID *s
 		return false
 	}
 }
+
+func (r *MemoryRepo) ClaimProcessing(ctx context.Context, id string, startedAt time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.byID[id]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if a.Status != StatusQueued || a.StartedAt != nil {
+		return false, nil
+	}
+	a.Status = StatusProcessing
+	a.StartedAt = &startedAt
+	a.UpdatedAt = startedAt
+	r.byID[id] = a
+	for i := range r.byUser[a.UserID] {
+		if r.byUser[a.UserID][i].ID == id {
+			r.byUser[a.UserID][i] = a
+			break
+		}
+	}
+	return true, nil
+}

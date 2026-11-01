@@ -186,7 +186,7 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 		return
 	}
 
-	analysis, err := h.Svc.Get(c.Request.Context(), analysisID)
+	analysis, err := h.Svc.GetOwnedAndRecover(c.Request.Context(), middleware.UserIDFromContext(c), analysisID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound):
