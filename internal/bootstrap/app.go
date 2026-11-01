@@ -445,6 +445,7 @@ func buildPaymentsService(cfg config.Config, sqlDB *sql.DB, analysisRepo analyse
 	}
 	svc := &payments.Service{
 		Repo:          repo,
+		Enabled:       cfg.PaywallEnabled,
 		Analyses:      analysisAdapter{repo: analysisRepo},
 		KeyID:         strings.TrimSpace(cfg.RazorpayKeyID),
 		KeySecret:     strings.TrimSpace(cfg.RazorpayKeySecret),
@@ -458,11 +459,12 @@ func buildPaymentsService(cfg config.Config, sqlDB *sql.DB, analysisRepo analyse
 		return svc
 	}
 	if svc.KeyID == "" || svc.KeySecret == "" || svc.WebhookSecret == "" {
-		log.Printf("PAYWALL_ENABLED is set but Razorpay credentials are incomplete; paywall disabled")
+		log.Printf("PAYWALL_ENABLED is set but Razorpay credentials are incomplete; checkout unavailable, paywall remains enabled")
 		return svc
 	}
-	svc.Orders = payments.NewRazorpayClient(svc.KeyID, svc.KeySecret)
-	svc.Enabled = true
+	provider := payments.NewRazorpayClient(svc.KeyID, svc.KeySecret)
+	svc.Orders = provider
+	svc.Payments = provider
 	return svc
 }
 

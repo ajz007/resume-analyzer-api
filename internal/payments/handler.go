@@ -110,6 +110,12 @@ func (h *Handler) verify(c *gin.Context) {
 			respond.Error(c, http.StatusServiceUnavailable, "payments_disabled", err.Error(), nil)
 		case errors.Is(err, ErrInvalidSignature):
 			respond.Error(c, http.StatusBadRequest, "invalid_signature", err.Error(), nil)
+		case errors.Is(err, ErrPaymentNotCaptured):
+			respond.Error(c, http.StatusConflict, "payment_pending", err.Error(), nil)
+		case errors.Is(err, ErrPaymentMismatch):
+			respond.Error(c, http.StatusBadRequest, "payment_mismatch", err.Error(), nil)
+		case errors.Is(err, ErrPaymentVerificationUnavailable):
+			respond.Error(c, http.StatusServiceUnavailable, "payment_verification_unavailable", ErrPaymentVerificationUnavailable.Error(), nil)
 		case errors.Is(err, ErrNotFound), errors.Is(err, ErrOrderUserMismatch):
 			respond.Error(c, http.StatusNotFound, "not_found", "order not found", nil)
 		default:
