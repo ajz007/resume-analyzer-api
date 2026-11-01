@@ -4,6 +4,7 @@ import "time"
 
 // Usage represents a user's plan consumption snapshot.
 type Usage struct {
+	Epoch    int64     `json:"-"`
 	Plan     string    `json:"plan"`
 	Limit    int       `json:"limit"`
 	Used     int       `json:"used"`

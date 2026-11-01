@@ -9,6 +9,7 @@ import (
 type memoryStore struct {
 	mu               sync.RWMutex
 	data             map[string]Usage
+	reservations     map[string]memoryReservation
 	applyRuns        map[string]ApplyRun
 	documentVersions map[string]DocumentVersion
 }
@@ -16,21 +17,13 @@ type memoryStore struct {
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		data:             make(map[string]Usage),
+		reservations:     make(map[string]memoryReservation),
 		applyRuns:        make(map[string]ApplyRun),
 		documentVersions: make(map[string]DocumentVersion),
 	}
 }
 
 func (s *memoryStore) Get(ctx context.Context, userID string) (Usage, error) {
-	if err := ctx.Err(); err != nil {
-		return Usage{}, err
-	}
-	s.mu.RLock()
-	u, ok := s.data[userID]
-	s.mu.RUnlock()
-	if ok {
-		return u, nil
-	}
 	return s.ensure(ctx, userID)
 }
 
@@ -59,6 +52,7 @@ func (s *memoryStore) ensure(ctx context.Context, userID string) (Usage, error) 
 	}
 	if now.After(u.ResetsAt) || now.Equal(u.ResetsAt) {
 		u.Used = 0
+		u.Epoch++
 		u.ResetsAt = nextMonthlyReset(now)
 	}
 	s.data[userID] = u
@@ -89,6 +83,7 @@ func (s *memoryStore) Consume(ctx context.Context, userID string, n int) (Usage,
 	}
 	if now.After(u.ResetsAt) || now.Equal(u.ResetsAt) {
 		u.Used = 0
+		u.Epoch++
 		u.ResetsAt = nextMonthlyReset(now)
 	}
 	if u.Used+n > u.Limit {
@@ -110,6 +105,7 @@ func (s *memoryStore) Reset(ctx context.Context, userID string) (Usage, error) {
 	if !ok {
 		u = defaultUsage(userID)
 	}
+	u.Epoch++
 	u.Plan = defaultPlan(userID)
 	u.Limit = defaultLimit(userID)
 	u.Used = 0

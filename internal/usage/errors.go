@@ -10,3 +10,6 @@ var ErrApplyRunNotFound = errors.New("apply run not found")
 
 // ErrAnalysisNotFound indicates an analysis record was not found.
 var ErrAnalysisNotFound = errors.New("analysis not found")
+
+// ErrReservationConflict prevents recharging a closed or differently owned review.
+var ErrReservationConflict = errors.New("review usage reservation is not available")
