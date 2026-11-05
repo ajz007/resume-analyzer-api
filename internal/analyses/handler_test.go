@@ -752,7 +752,19 @@ func TestPublicGetShareByTokenReturnsSanitizedAnalysisResult(t *testing.T) {
 		JobDescription: "private job description",
 		Status:         StatusCompleted,
 		Result: map[string]any{
-			"summary": "ok",
+			"summary":        "ok",
+			"bulletRewrites": []any{map[string]any{"before": "PRIVATE_LEGACY"}},
+			"report": map[string]any{
+				"schemaVersion": "3",
+				"edits": []any{
+					map[string]any{"id": "e1", "operation": "remove", "before": "PRIVATE_ORIGINAL", "sourceQuotes": []any{"PRIVATE_QUOTE"}},
+					map[string]any{"id": "e2", "operation": "move", "insertAfter": "PRIVATE_ANCHOR", "after": "Suggested wording"},
+					map[string]any{"id": "e3", "operation": "retain", "after": "PRIVATE_RETAIN_EDIT"},
+				},
+				"sections": []any{map[string]any{"heading": "Experience", "editIds": []any{"e2"}, "retained": []any{map[string]any{"text": "PRIVATE_RETAINED"}}}},
+				"coverage": []any{map[string]any{"sourceQuote": "PRIVATE_COVERAGE"}},
+				"cleanup":  []any{map[string]any{"text": "Check scope", "sourceQuote": "PRIVATE_CLEANUP"}},
+			},
 		},
 		CreatedAt: time.Now().UTC(),
 	}
@@ -782,6 +794,20 @@ func TestPublicGetShareByTokenReturnsSanitizedAnalysisResult(t *testing.T) {
 	router.ServeHTTP(publicResp, publicReq)
 	if publicResp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", publicResp.Code)
+	}
+
+	if strings.Contains(publicResp.Body.String(), "PRIVATE_") || !strings.Contains(publicResp.Body.String(), "Suggested wording") {
+		t.Fatal("shared response must hide originals and preserve suggested wording")
+	}
+	if publicResp.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatal("shared results must not be cached")
+	}
+	ownerReq := httptest.NewRequest(http.MethodGet, "/api/v1/analyses/"+analysis.ID, nil)
+	addGuestHeader(ownerReq)
+	ownerResp := httptest.NewRecorder()
+	router.ServeHTTP(ownerResp, ownerReq)
+	if ownerResp.Code != http.StatusOK || !strings.Contains(ownerResp.Body.String(), "PRIVATE_ORIGINAL") {
+		t.Fatal("owner report must keep the original comparison")
 	}
 
 	var payload map[string]any
