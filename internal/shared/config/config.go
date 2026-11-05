@@ -75,7 +75,7 @@ func Load() Config {
 		RazorpayKeyID:         getEnv("RAZORPAY_KEY_ID", ""),
 		RazorpayKeySecret:     getEnv("RAZORPAY_KEY_SECRET", ""),
 		RazorpayWebhookSecret: getEnv("RAZORPAY_WEBHOOK_SECRET", ""),
-		PriceINRPaise:         getInt64Env("PRICE_INR_PAISE", 49900),
+		PriceINRPaise:         getInt64Env("PRICE_INR_PAISE", 24900),
 		PriceUSDCents:         getInt64Env("PRICE_USD_CENTS", 900),
 	}
 }

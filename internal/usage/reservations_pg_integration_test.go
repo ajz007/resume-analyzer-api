@@ -9,7 +9,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"resume-backend/internal/account"
 	"resume-backend/internal/analyses"
+	"resume-backend/internal/documents"
 	"resume-backend/internal/queue"
 	"resume-backend/internal/usage"
 	"strings"
@@ -324,4 +326,43 @@ func addDocument(t *testing.T, db *sql.DB, user string) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func TestPGClaimCarriesPreviewOnceAndFailedPendingPreviewRestoresAccountAllowance(t *testing.T) {
+	for _, terminal := range []string{"completed", "failed"} {
+		t.Run(terminal, func(t *testing.T) {
+			db := usageDB(t)
+			ctx := context.Background()
+			const guest, owner = "guest:claim", "google:claim"
+			svc := usage.NewPostgresService(usage.NewPGStore(db))
+			accounts := account.NewService(&documents.PGRepo{DB: db}, &analyses.PGRepo{DB: db})
+			id := addAnalysis(t, db, guest)
+			if _, err := svc.ReserveAnalysis(ctx, guest, id); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				if _, err := accounts.ClaimGuest(ctx, guest, owner); err != nil {
+					t.Fatal(err)
+				}
+				mustUsage(t, svc, owner, 1)
+				mustUsage(t, svc, guest, 1)
+			}
+			if _, err := db.Exec(`UPDATE analyses SET status=$2 WHERE id=$1`, id, terminal); err != nil {
+				t.Fatal(err)
+			}
+			if terminal == "failed" {
+				mustUsage(t, svc, owner, 0)
+			} else {
+				mustUsage(t, svc, owner, 1)
+				for i := 0; i < 2; i++ {
+					if _, err := svc.ReserveAnalysis(ctx, owner, addAnalysis(t, db, owner)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := svc.ReserveAnalysis(ctx, owner, addAnalysis(t, db, owner)); !errors.Is(err, usage.ErrLimitReached) {
+					t.Fatalf("expected limit, got %v", err)
+				}
+			}
+		})
+	}
 }

@@ -174,9 +174,9 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 
 func usageLimitReachedMessage(userID string) string {
 	if usage.IsGuestUserID(userID) {
-		return "You've used your 3 free guest analyses this month. Sign in to continue with 15 free analyses/month and save your history."
+		return "You've used your free guest preview this month. Sign in to save your review and get up to three previews total this month."
 	}
-	return "You've used your 15 free analyses this month."
+	return "You've used your 3 free previews this month."
 }
 
 func (h *Handler) getAnalysis(c *gin.Context) {

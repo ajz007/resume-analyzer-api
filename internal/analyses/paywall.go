@@ -1,6 +1,9 @@
 package analyses
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // UnlockChecker decides whether a user can see a full report. payments.Service implements it.
 type UnlockChecker interface {
@@ -73,6 +76,17 @@ func RedactForFreeTier(result map[string]any) (map[string]any, []string) {
 	if report, ok := out["report"].(map[string]any); ok {
 		// Allowlist only non-paid navigation. Never shallow-copy future report fields.
 		preview := map[string]any{"schemaVersion": report["schemaVersion"], "scope": report["scope"], "priorities": report["priorities"]}
+		// Share one useful prompt without exposing answer controls or the paid question list.
+		if questions, ok := report["questions"].([]any); ok {
+			for _, item := range questions {
+				if question, ok := item.(map[string]any); ok {
+					if text, ok := question["question"].(string); ok && strings.TrimSpace(text) != "" {
+						preview["previewNextStep"] = strings.TrimSpace(text)
+						break
+					}
+				}
+			}
+		}
 		out["report"] = preview
 		locked = append(locked, LockedReport)
 	}

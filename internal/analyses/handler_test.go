@@ -443,16 +443,43 @@ func TestStartAnalysisFailedRequiresRetry(t *testing.T) {
 	}
 }
 
-func TestGuestUserCanRunAnalysesOneThroughThreeAndIsBlockedOnFour(t *testing.T) {
+func TestGuestUserCanRunOnePreviewAndIsBlockedOnSecond(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router, docRepo, _, store, _ := setupAnalysisRouter(t)
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 2; i++ {
 		documentID := seedDocumentWithSuffix(t, docRepo, store, "guest:test-guest", strconv.Itoa(i))
 		req := newAnalysisRequest(t, documentID, map[string]string{
 			"jobDescription": strings.Repeat("a", 300),
 		})
 		addGuestHeader(req)
+
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if i == 1 && resp.Code != http.StatusAccepted {
+			t.Fatalf("expected request %d to be accepted, got %d: %s", i, resp.Code, resp.Body.String())
+		}
+		if i == 2 {
+			if resp.Code != http.StatusTooManyRequests {
+				t.Fatalf("expected request 2 to be blocked, got %d: %s", resp.Code, resp.Body.String())
+			}
+			assertUsageLimitError(t, resp, "You've used your free guest preview this month. Sign in to save your review and get up to three previews total this month.")
+		}
+	}
+}
+
+func TestAuthenticatedFreeUserCanRunThreePreviewsAndIsBlockedOnFourth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, docRepo, _, store, _ := setupAnalysisRouter(t)
+	userID := "google:quota-user"
+	for i := 1; i <= 4; i++ {
+		documentID := seedDocumentWithSuffix(t, docRepo, store, userID, strconv.Itoa(i))
+		req := newAnalysisRequest(t, documentID, map[string]string{
+			"jobDescription": strings.Repeat("a", 300),
+		})
+		addAuthHeader(t, req, userID)
 
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -464,34 +491,7 @@ func TestGuestUserCanRunAnalysesOneThroughThreeAndIsBlockedOnFour(t *testing.T) 
 			if resp.Code != http.StatusTooManyRequests {
 				t.Fatalf("expected request 4 to be blocked, got %d: %s", resp.Code, resp.Body.String())
 			}
-			assertUsageLimitError(t, resp, "You've used your 3 free guest analyses this month. Sign in to continue with 15 free analyses/month and save your history.")
-		}
-	}
-}
-
-func TestAuthenticatedFreeUserCanRunAnalysesUpToFifteenAndIsBlockedOnSixteen(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	router, docRepo, _, store, _ := setupAnalysisRouter(t)
-	userID := "google:quota-user"
-	for i := 1; i <= 16; i++ {
-		documentID := seedDocumentWithSuffix(t, docRepo, store, userID, strconv.Itoa(i))
-		req := newAnalysisRequest(t, documentID, map[string]string{
-			"jobDescription": strings.Repeat("a", 300),
-		})
-		addAuthHeader(t, req, userID)
-
-		resp := httptest.NewRecorder()
-		router.ServeHTTP(resp, req)
-
-		if i <= 15 && resp.Code != http.StatusAccepted {
-			t.Fatalf("expected request %d to be accepted, got %d: %s", i, resp.Code, resp.Body.String())
-		}
-		if i == 16 {
-			if resp.Code != http.StatusTooManyRequests {
-				t.Fatalf("expected request 16 to be blocked, got %d: %s", resp.Code, resp.Body.String())
-			}
-			assertUsageLimitError(t, resp, "You've used your 15 free analyses this month.")
+			assertUsageLimitError(t, resp, "You've used your 3 free previews this month.")
 		}
 	}
 }

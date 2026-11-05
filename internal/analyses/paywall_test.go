@@ -154,3 +154,24 @@ func TestGetAnalysisFullWhenUnlockedOrPaywallOff(t *testing.T) {
 		}
 	}
 }
+
+func TestFreePreviewIncludesOneActionWithoutPaidQuestions(t *testing.T) {
+	result := map[string]any{"report": map[string]any{
+		"schemaVersion": "3",
+		"questions": []any{
+			map[string]any{"id": "private-id", "question": "When did you start managing engineers?"},
+			map[string]any{"question": "Second question"},
+		},
+		"edits": []any{map[string]any{"after": "Paid edit"}},
+	}}
+	out, locked := RedactForFreeTier(result)
+	preview := out["report"].(map[string]any)
+	if !reflect.DeepEqual(locked, []string{LockedReport}) || preview["previewNextStep"] != "When did you start managing engineers?" {
+		t.Fatalf("expected a locked preview with one next step, got %v", preview)
+	}
+	for _, field := range []string{"edits", "questions"} {
+		if _, exists := preview[field]; exists {
+			t.Fatalf("paid field %q leaked", field)
+		}
+	}
+}
