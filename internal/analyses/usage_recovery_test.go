@@ -3,6 +3,8 @@ package analyses
 import (
 	"context"
 	"errors"
+	"fmt"
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/usage"
 	"testing"
 	"time"
@@ -72,5 +74,16 @@ func TestMissingQueueDoesNotReserveAllowanceOrCreateReview(t *testing.T) {
 	}
 	if rows, err := repo.ListByUser(ctx, "user", 10, 0); err != nil || len(rows) != 0 {
 		t.Fatalf("%+v %v", rows, err)
+	}
+}
+
+func TestAISafeguardsDoNotTriggerTransientRetry(t *testing.T) {
+	err := fmt.Errorf("llm timeout wrapper: %w", &aimeter.ControlError{Code: aimeter.CodeUnavailable})
+	if shouldRetryLLM(err) {
+		t.Fatal("safeguard denial treated as a transient provider failure")
+	}
+	code, retryable := classifyFailure(err)
+	if code != aimeter.CodeUnavailable || !retryable {
+		t.Fatalf("%s %v", code, retryable)
 	}
 }

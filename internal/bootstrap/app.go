@@ -282,10 +282,7 @@ func buildServices(app *App) error {
 	if analysisModel == "" {
 		analysisModel = app.Config.LLMModel
 	}
-	var usageRecorder aimeter.Recorder
-	if app.DB != nil {
-		usageRecorder = &aimeter.PGRecorder{DB: app.DB}
-	}
+	usageRecorder := &aimeter.PGRecorder{DB: app.DB}
 	llmClient := llm.Client(llm.PlaceholderClient{})
 	if app.Config.LLMProvider == "openai" {
 		openaiClient, err := openai.NewClient(os.Getenv("OPENAI_API_KEY"), analysisModel)

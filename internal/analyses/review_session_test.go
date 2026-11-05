@@ -10,6 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/llm"
 )
 
@@ -239,5 +240,31 @@ func TestReviewSectionNameReusesOnlyUniqueWholeHeading(t *testing.T) {
 	report.Sections = append(report.Sections, ReviewSection{Heading: "Example"})
 	if got := reviewSectionName(report, "Example Platforms | Backend Engineer"); got != "Example Platforms | Backend Engineer" {
 		t.Fatal("ambiguous heading was guessed")
+	}
+}
+
+type stoppedAnswerClient struct{ noSpend bool }
+
+func (c stoppedAnswerClient) AnalyzeResume(context.Context, llm.AnalyzeInput) (json.RawMessage, error) {
+	return nil, errors.New("full analysis must not run")
+}
+func (c stoppedAnswerClient) ReviseReview(context.Context, llm.ReviewRevisionInput) (json.RawMessage, error) {
+	return nil, &aimeter.ControlError{Code: aimeter.CodeDailyBudget, NoProviderSpend: c.noSpend}
+}
+func TestBlockedAnswerRestoresOnlyAnUnspentAttempt(t *testing.T) {
+	for _, unspent := range []bool{true, false} {
+		svc, a, req, _ := sessionFixture(t)
+		svc.LLM = stoppedAnswerClient{noSpend: unspent}
+		state, err := svc.answerReview(context.Background(), a, reviewSource, req)
+		if _, ok := aimeter.Control(err); !ok {
+			t.Fatalf("%v", err)
+		}
+		want := 1
+		if unspent {
+			want = 0
+		}
+		if state.Attempts != want || state.Pending != nil || len(state.Answers) != 0 {
+			t.Fatalf("unspent=%v state=%+v", unspent, state)
+		}
 	}
 }

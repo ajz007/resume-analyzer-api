@@ -110,6 +110,9 @@ func (c *PromptClient) Complete(ctx context.Context, prompt string) (string, err
 		return "", fmt.Errorf("openai response missing choices")
 	}
 
+	if parsed.Choices[0].FinishReason == "length" {
+		return "", &aimeter.ControlError{Code: aimeter.CodeOutputLimit}
+	}
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
 	if content == "" {
 		return "", fmt.Errorf("openai response empty content")

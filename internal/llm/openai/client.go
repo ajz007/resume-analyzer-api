@@ -255,7 +255,7 @@ func (c *Client) analyzeOnceWithTemp(ctx context.Context, input llm.AnalyzeInput
 		return nil, nil, fmt.Errorf("model refused the analysis request")
 	}
 	if parsed.Choices[0].FinishReason == "length" {
-		return nil, nil, fmt.Errorf("model output was truncated")
+		return nil, nil, &aimeter.ControlError{Code: aimeter.CodeOutputLimit}
 	}
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
 	if content == "" {

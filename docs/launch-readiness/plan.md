@@ -73,7 +73,7 @@ Merged in API PR #32; scheduled resources remain undeployed by the owner's curre
 
 ### Measurement increment
 
-Implemented on `codex/ai-usage-ledger`, pending review/deployment:
+Merged in API PR #33:
 
 - Record each provider HTTP attempt, including retries/repairs and failed/invalid outputs, with internal operation/review identifiers.
 - Preserve missing, interrupted and unpriced usage explicitly. Add versioned standard-global GPT-6.1 Sol reference estimates and private read-only coverage/cost reports.
@@ -81,13 +81,10 @@ Implemented on `codex/ai-usage-ledger`, pending review/deployment:
 - Measurement is best effort and does not enforce a budget. Check coverage/gap logs before using measured means/P95 to price the offer.
 - See ai-usage-measurement.md and ai-usage-reports.sql for deployment, rate assumptions, validation and operator queries.
 
-### Remaining spending controls and validation
+### Spending controls and validation
 
-- Record provider/model, operation, input/output tokens, latency, retries and known/unknown cost for each review and answer; exclude resume text and personal details from cost logs.
-- Set explicit output, input/document and clarification limits on every AI path, including optional generation/tailoring paths. Count repair attempts and retries in the same operation budget.
-- Introduce shared usage controls and a daily spend ceiling with an operator stop control. Rotating a guest header must not create an unlimited allowance.
-- Measure a representative set of real-length resumes and job descriptions with deliberately bounded spend before choosing final limits. Offline estimates are insufficient for P95 cost.
-- Acceptance: token exhaustion, provider errors and the daily ceiling produce understandable recoverable states; no unmetered generation route bypasses the controls.
+- The spending controls increment adds a shared US$50 per UTC day budget, an operator pause switch, and input, output and retry limits. See [the rollout and operator instructions](ai-spending-controls.md).
+- Measure representative resumes and job descriptions with bounded spend before choosing final limits or setting prices. Use observed cost coverage and P95 to assess the offer.
 
 ## 3. Package the offer and implement checkout
 

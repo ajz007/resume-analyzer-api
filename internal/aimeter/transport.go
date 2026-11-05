@@ -60,7 +60,33 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	s, n := nextScope(req.Context())
 	a := Attempt{ID: uuid.NewString(), OperationID: s.ID, Operation: s.Kind, AnalysisID: s.AnalysisID, ObjectID: s.ObjectID, Stage: s.Stage, Retry: s.Retry, Number: n, Provider: "openai", RequestedModel: t.Model, StartedAt: time.Now().UTC(), UsageState: "pending", Outcome: "pending", UnknownReason: "awaiting_response"}
-	writeRecord(t.Recorder, a, false)
+	if gate, ok := t.Recorder.(guard); ok {
+		if req.Body == nil {
+			return nil, &ControlError{Code: CodeInputLimit, NoProviderSpend: n == 1}
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(req.Body, absoluteRequestBytes+1))
+		_ = req.Body.Close()
+		if readErr != nil || len(raw) > absoluteRequestBytes {
+			return nil, &ControlError{Code: CodeInputLimit, NoProviderSpend: n == 1}
+		}
+		gateCtx, cancel := context.WithTimeout(req.Context(), 3*time.Second)
+		prepared, gateErr := gate.Admit(gateCtx, &a, raw)
+		cancel()
+		if gateErr != nil {
+			if control, ok := Control(gateErr); ok {
+				copy := *control
+				copy.NoProviderSpend = n == 1
+				gateErr = &copy
+			}
+			return nil, gateErr
+		}
+		req = req.Clone(req.Context())
+		req.Body = io.NopCloser(bytes.NewReader(prepared))
+		req.ContentLength = int64(len(prepared))
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(prepared)), nil }
+	} else {
+		writeRecord(t.Recorder, a, false)
+	}
 	start := time.Now()
 	resp, err := base.RoundTrip(req)
 	if err != nil {
