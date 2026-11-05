@@ -502,7 +502,7 @@ func (h *Handler) getSharedAnalysis(c *gin.Context) {
 		"id":             analysis.ID,
 		"mode":           analysis.Mode,
 		"status":         analysis.Status,
-		"result":         result,
+		"result":         publicShareResult(result),
 		"locked":         locked,
 		"lockedSections": sections,
 	}
@@ -512,6 +512,7 @@ func (h *Handler) getSharedAnalysis(c *gin.Context) {
 	if analysis.CompletedAt != nil {
 		resp["completedAt"] = analysis.CompletedAt
 	}
+	c.Header("Cache-Control", "private, no-store")
 	respond.JSON(c, http.StatusOK, resp)
 }
 
