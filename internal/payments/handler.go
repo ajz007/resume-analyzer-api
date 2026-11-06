@@ -31,6 +31,9 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/payments/config", h.getConfig)
 	rg.GET("/payments/purchases/:analysisId", h.recoverPurchase)
+	rg.GET("/payments/review-credits", h.getCredits)
+	rg.POST("/payments/review-credits/:id", h.buyCredit)
+	rg.GET("/payments/review-credits/:id", h.recoverCredit)
 	rg.POST("/payments/orders", h.createOrder)
 	rg.POST("/payments/verify", h.verify)
 	rg.POST("/payments/webhook", h.webhook)

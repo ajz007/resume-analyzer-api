@@ -57,11 +57,14 @@ func purchaseTestDB(t *testing.T, seed func(*sql.DB)) *PGRepo {
 			t.Fatal(err)
 		}
 	}
+	apply("0001_documents.sql")
+	apply("0002_analyses.sql")
 	apply("0024_payments.sql")
 	if seed != nil {
 		seed(db)
 	}
 	apply("0026_purchase_reservations.sql")
+	apply("0031_review_credits.sql")
 	return &PGRepo{DB: db}
 }
 func TestPGConcurrentPurchaseReservationAndRecovery(t *testing.T) {

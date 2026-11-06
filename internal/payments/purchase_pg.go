@@ -13,14 +13,38 @@ func (r *PGRepo) ReservePurchase(ctx context.Context, p Payment) (Payment, bool,
 	if err := r.adoptLegacyPurchase(ctx, p.UserID, p.AnalysisID); err != nil {
 		return Payment{}, false, err
 	}
-	// A unique key in PostgreSQL elects the creator across processes and Lambda instances.
-	result, err := r.DB.ExecContext(ctx, `INSERT INTO payment_purchases (user_id,analysis_id,payment_id,amount_minor,currency,created_at)
+	// Serialize a legacy report checkout against spending a credit on the same review.
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Payment{}, false, err
+	}
+	defer tx.Rollback()
+	var analysisID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM analyses WHERE id=$1 AND user_id=$2 FOR UPDATE`, p.AnalysisID, p.UserID).Scan(&analysisID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Payment{}, false, err
+	}
+	if analysisID != "" {
+		var used bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM review_credit_uses u JOIN payments p ON p.id=u.payment_id
+		WHERE u.analysis_id=$1 AND u.user_id=$2 AND u.released_at IS NULL AND p.status='paid')`, p.AnalysisID, p.UserID).Scan(&used)
+		if err != nil {
+			return Payment{}, false, err
+		}
+		if used {
+			return Payment{}, false, ErrAlreadyUnlocked
+		}
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO payment_purchases (user_id,analysis_id,payment_id,amount_minor,currency,created_at)
  VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id,analysis_id) DO NOTHING`, p.UserID, p.AnalysisID, p.ID, p.AmountMinor, p.Currency, p.CreatedAt)
 	if err != nil {
 		return Payment{}, false, err
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
+		return Payment{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
 		return Payment{}, false, err
 	}
 	existing, err := r.GetPurchase(ctx, p.UserID, p.AnalysisID)

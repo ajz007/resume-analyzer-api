@@ -39,6 +39,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/documents/:id/analyze", h.startAnalysis)
 	rg.GET("/analyses", h.listAnalyses)
 	rg.GET("/analyses/:id", h.getAnalysis)
+	rg.POST("/analyses/:id/use-review-credit", h.useReviewCredit)
 	rg.POST("/analyses/:id/reviewed-resume", h.downloadReviewedResume)
 	rg.GET("/analyses/:id/review-session", h.getReviewSession)
 	rg.PUT("/analyses/:id/review-session/choices", h.saveReviewChoices)
@@ -52,6 +53,7 @@ type startAnalysisRequest struct {
 	JobDescription string `json:"jobDescription"`
 	PromptVersion  string `json:"promptVersion"`
 	Mode           string `json:"mode"`
+	UseCredit      bool   `json:"useReviewCredit"`
 }
 
 const defaultPollAfterMs = 2000
@@ -130,9 +132,17 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 		allowRetry = true
 	}
 
-	analysis, created, err := h.Svc.StartOrReuse(ctx, doc.ID, userID, req.JobDescription, req.PromptVersion, mode, allowRetry)
+	if req.UseCredit && (mode != ModeJobMatch || usage.IsGuestUserID(userID) || h.Unlocks == nil || !h.Unlocks.PaywallActive()) {
+		respond.Error(c, http.StatusForbidden, "credits_unavailable", "Sign in to use a credit for a job match review.", nil)
+		return
+	}
+	analysis, created, err := h.Svc.startOrReuse(ctx, doc.ID, userID, req.JobDescription, req.PromptVersion, mode, allowRetry, req.UseCredit)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrNoReviewCredit), errors.Is(err, ErrCreditCheckoutExists):
+			respond.Error(c, http.StatusConflict, "review_credit_unavailable", err.Error(), nil)
+		case errors.Is(err, ErrCreditsUnavailable):
+			respond.Error(c, http.StatusServiceUnavailable, "credits_unavailable", err.Error(), nil)
 		case errors.Is(err, ErrRetryRequired):
 			if isParseFailureAnalysis(analysis) {
 				respond.JSON(c, http.StatusOK, parseFailureResponse(analysis))
@@ -153,10 +163,14 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	c.Set("analysisId", analysis.ID)
 
 	if !created && analysis.Status == StatusCompleted && analysis.Result != nil {
+		result, locked, sections, err := h.applyPaywall(ctx, userID, analysis.ID, analysis.Result)
+		if err != nil {
+			respond.Error(c, http.StatusServiceUnavailable, "review_unavailable", "Could not load this review.", nil)
+			return
+		}
 		respond.JSON(c, http.StatusOK, gin.H{
-			"analysisId": analysis.ID,
-			"status":     analysis.Status,
-			"result":     analysis.Result,
+			"analysisId": analysis.ID, "status": analysis.Status,
+			"result": result, "locked": locked, "lockedSections": sections,
 		})
 		return
 	}
