@@ -316,6 +316,12 @@ func (s *Service) finishReviewAnswer(ctx context.Context, analysis Analysis, sou
 	if err != nil {
 		state.LastRequest = &req
 		state.LastError = "The answer could not be safely turned into an edit. Earlier edits are unchanged. You can try again."
+		if control, ok := aimeter.Control(err); ok {
+			state.LastError = control.Error()
+			if control.NoProviderSpend && state.Attempts > 0 {
+				state.Attempts--
+			}
+		}
 	} else {
 		state.Answers = append(state.Answers, answer)
 	}

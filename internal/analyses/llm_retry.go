@@ -50,6 +50,9 @@ func (r retryingLLM) AnalyzeResume(ctx context.Context, input llm.AnalyzeInput) 
 }
 
 func shouldRetryLLM(err error) bool {
+	if _, blocked := aimeter.Control(err); blocked {
+		return false
+	}
 	if err == nil {
 		return false
 	}

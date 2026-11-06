@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"resume-backend/internal/aimeter"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -64,6 +65,14 @@ func (h *Handler) apply(c *gin.Context) {
 		var missing contract.MissingFieldsError
 		if errors.As(err, &missing) {
 			respond.Error(c, http.StatusBadRequest, "missing_required_fields", "missing required fields", missing.Fields)
+			return
+		}
+		if control, ok := aimeter.Control(err); ok {
+			status := http.StatusServiceUnavailable
+			if control.Code == aimeter.CodeInputLimit {
+				status = 422
+			}
+			respond.Error(c, status, control.Code, control.Error(), nil)
 			return
 		}
 		switch {

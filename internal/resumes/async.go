@@ -3,6 +3,7 @@ package resumes
 import (
 	"context"
 	"errors"
+	"resume-backend/internal/aimeter"
 	"strings"
 	"time"
 
@@ -227,6 +228,9 @@ func stringPtr(value string) *string {
 }
 
 func classifyGenerationErrorType(err error) string {
+	if control, ok := aimeter.Control(err); ok {
+		return control.Code
+	}
 	switch {
 	case err == nil:
 		return ""

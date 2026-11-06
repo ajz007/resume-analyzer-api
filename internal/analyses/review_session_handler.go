@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"resume-backend/internal/aimeter"
 	"strings"
 	"time"
 
@@ -159,6 +160,13 @@ func (h *Handler) answerReviewQuestion(c *gin.Context) {
 		message := "The answer could not be processed. Check the requirement, answer and confirmation, then reload the review before retrying."
 		if code == 409 {
 			message = "This review has changed or an answer is processing. Reload the latest review before retrying."
+		}
+		if control, ok := aimeter.Control(err); ok {
+			code = 503
+			message = control.Error()
+			if control.Code == aimeter.CodeInputLimit {
+				code = 422
+			}
 		}
 		c.JSON(code, gin.H{"error": message})
 		return

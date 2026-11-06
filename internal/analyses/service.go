@@ -729,6 +729,9 @@ func durationMs(startedAt, completedAt *time.Time) float64 {
 }
 
 func classifyFailure(err error) (string, bool) {
+	if control, ok := aimeter.Control(err); ok {
+		return control.Code, control.Code != aimeter.CodeInputLimit && control.Code != aimeter.CodeAttemptLimit && control.Code != aimeter.CodeOutputLimit
+	}
 	if err == nil {
 		return ErrorCodeInternal, false
 	}
@@ -762,6 +765,9 @@ func classifyFailure(err error) (string, bool) {
 }
 
 func sanitizeError(err error) string {
+	if control, ok := aimeter.Control(err); ok {
+		return control.Error()
+	}
 	if err == nil {
 		return ""
 	}

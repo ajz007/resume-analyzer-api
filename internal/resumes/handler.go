@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"resume-backend/internal/aimeter"
 	"strconv"
 	"strings"
 	"time"
@@ -360,6 +361,13 @@ func (h *Handler) getGeneration(c *gin.Context) {
 		}
 	case GenerationJobStatusFailed:
 		response["errorMessage"] = generationFailedMessage
+		if job.ErrorType != nil {
+			switch *job.ErrorType {
+			case aimeter.CodeOutputLimit, aimeter.CodeDailyBudget, aimeter.CodePaused, aimeter.CodeInputLimit, aimeter.CodeAttemptLimit, aimeter.CodeUnavailable:
+				response["errorCode"] = *job.ErrorType
+				response["errorMessage"] = (&aimeter.ControlError{Code: *job.ErrorType}).Error()
+			}
+		}
 	}
 
 	respond.JSON(c, http.StatusOK, response)
@@ -732,6 +740,13 @@ func validateGenerateResumeRequest(req generateResumeRequest) []modelv1.Validati
 }
 
 func classifyServiceError(err error) (status int, code, message string, details any) {
+	if control, ok := aimeter.Control(err); ok {
+		status = 503
+		if control.Code == aimeter.CodeInputLimit {
+			status = 422
+		}
+		return status, control.Code, control.Error(), nil
+	}
 	var validationErr ValidationError
 	switch {
 	case errors.As(err, &validationErr):

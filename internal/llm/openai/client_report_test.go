@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"resume-backend/internal/aimeter"
 	"resume-backend/internal/llm"
 )
 
@@ -59,6 +60,13 @@ func TestReportV3HandlesRefusalAndTruncationWithoutSourceFreeRepair(t *testing.T
 			apiURL = server.URL
 			client, _ := NewClient("test-key", "gpt-6.1-sol")
 			_, err := client.AnalyzeResume(context.Background(), llm.AnalyzeInput{PromptVersion: "v3", ResponseSchema: json.RawMessage(`{"type":"object"}`)})
+			if tc.name == "truncation" {
+				control, ok := aimeter.Control(err)
+				if !ok || control.Code != aimeter.CodeOutputLimit || calls != 1 {
+					t.Fatalf("calls=%d error=%v", calls, err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tc.expected) || calls != 1 {
 				t.Fatalf("calls=%d error=%v", calls, err)
 			}
