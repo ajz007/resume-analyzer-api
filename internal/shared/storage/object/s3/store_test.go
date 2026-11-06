@@ -1,6 +1,17 @@
 package s3
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+)
 
 func TestApplyPrefix(t *testing.T) {
 	t.Parallel()
@@ -26,5 +37,29 @@ func TestApplyPrefix(t *testing.T) {
 				t.Fatalf("applyPrefix(%q, %q) = %q, want %q", tt.prefix, tt.key, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSaveWithKeySendsSeekableSnapshot(t *testing.T) {
+	data := []byte("saved resume bytes")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/bucket/documents/user/tailored.docx" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil || !bytes.Equal(body, data) || r.ContentLength != int64(len(data)) {
+			t.Errorf("unexpected request body or length: %v, %d", err, r.ContentLength)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := awss3.New(awss3.Options{
+		Region: "us-east-1", BaseEndpoint: aws.String(server.URL), UsePathStyle: true,
+		Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
+	})
+	store := &Store{client: client, bucket: "bucket"}
+	size, err := store.SaveWithKey(context.Background(), "documents/user/tailored.docx", "application/octet-stream", bytes.NewReader(data))
+	if err != nil || size != int64(len(data)) {
+		t.Fatalf("snapshot upload size=%d err=%v", size, err)
 	}
 }
