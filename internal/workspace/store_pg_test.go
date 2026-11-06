@@ -14,9 +14,9 @@ func TestPGSearchScopesAndEscapesLiteralQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(`FROM analyses a[\s\S]*WHERE a.user_id=\$1 AND a.deleted_at IS NULL[\s\S]*LIMIT \$4 OFFSET \$5`).WithArgs("owner", "100%_", `%100\%\_%`, 20, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "doc", "file", "job", "mode", "status", "date", "company", "role"}).AddRow("id", "doc", "file.pdf", "job", "job_match", "completed", time.Now(), "Company", "Engineer"))
+	mock.ExpectQuery(`FROM analyses a[\s\S]*WHERE a.user_id=\$1 AND a.deleted_at IS NULL[\s\S]*LIMIT \$4 OFFSET \$5`).WithArgs("owner", "100%_", `%100\%\_%`, 20, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "doc", "file", "job", "mode", "status", "date", "company", "role", "recheck"}).AddRow("id", "doc", "file.pdf", "job", "job_match", "completed", time.Now(), "Company", "Engineer", "queued"))
 	apps, err := (&PGStore{DB: db}).List(context.Background(), "owner", "100%_", 20, 0)
-	if err != nil || len(apps) != 1 || apps[0].CompanyName != "Company" {
+	if err != nil || len(apps) != 1 || apps[0].CompanyName != "Company" || apps[0].RecheckStatus != "queued" {
 		t.Fatal(apps, err)
 	}
 	if err = mock.ExpectationsWereMet(); err != nil {

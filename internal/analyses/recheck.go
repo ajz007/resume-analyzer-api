@@ -13,10 +13,11 @@ import (
 )
 
 type recheckSummary struct {
-	AnalysisID string   `json:"analysisId"`
-	DocumentID string   `json:"documentId"`
-	Status     string   `json:"status"`
-	Score      *float64 `json:"score,omitempty"`
+	AnalysisID       string   `json:"analysisId"`
+	DocumentID       string   `json:"documentId"`
+	Status           string   `json:"status"`
+	Score            *float64 `json:"score,omitempty"`
+	PaidReviewCredit string   `json:"paidReviewCredit,omitempty"`
 }
 
 func (h *Handler) startRecheck(c *gin.Context) {
@@ -122,9 +123,11 @@ func (h *Handler) listRechecks(c *gin.Context) {
 	items := []recheckSummary{}
 	if parentID == "" {
 		rows, err := repo.DB.QueryContext(ctx, `
-			SELECT DISTINCT ON (document_id) id, document_id, status
-			FROM analyses WHERE recheck_of=$1 AND user_id=$2 AND deleted_at IS NULL
-			ORDER BY document_id, created_at DESC, id DESC`, original.ID, user)
+			SELECT id, document_id, status FROM (
+				SELECT DISTINCT ON (document_id) id, document_id, status, created_at
+				FROM analyses WHERE recheck_of=$1 AND user_id=$2 AND deleted_at IS NULL
+				ORDER BY document_id, created_at DESC, id DESC
+			) latest ORDER BY created_at DESC, id DESC`, original.ID, user)
 		if err != nil {
 			c.Status(http.StatusServiceUnavailable)
 			return
@@ -142,6 +145,12 @@ func (h *Handler) listRechecks(c *gin.Context) {
 		if rows.Err() != nil {
 			c.Status(http.StatusServiceUnavailable)
 			return
+		}
+		if len(items) > 0 && items[0].Status == StatusFailed {
+			latest := Analysis{ID: items[0].AnalysisID, UserID: user, Status: StatusFailed}
+			if credit, err := repo.paidCreditStatus(ctx, latest); err == nil {
+				items[0].PaidReviewCredit = credit
+			}
 		}
 		for i := range items {
 			if items[i].Status != StatusCompleted {

@@ -17,6 +17,7 @@ import (
 	"resume-backend/internal/payments"
 	"resume-backend/internal/queue"
 	"resume-backend/internal/usage"
+	"resume-backend/internal/workspace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -659,6 +660,16 @@ func TestPGSameJobRecheckReusesCreditAndKeepsOriginal(t *testing.T) {
 		t.Fatal("recheck did not retain job and original review linkage", gotJD, gotParent, err)
 	}
 	if w := call("GET", path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), reply.AnalysisID) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	applications, err := (&workspace.PGStore{DB: db}).List(ctx, "user", "", 20, 0)
+	if err != nil || len(applications) != 1 || applications[0].AnalysisID != original || applications[0].RecheckStatus != "queued" {
+		t.Fatalf("expected queued recheck on the original application: %+v, %v", applications, err)
+	}
+	if _, err := db.Exec(`UPDATE analyses SET status='failed' WHERE id=$1`, reply.AnalysisID); err != nil {
+		t.Fatal(err)
+	}
+	if w := call("GET", path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"paidReviewCredit":"returned"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
