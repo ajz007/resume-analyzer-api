@@ -21,8 +21,16 @@ type ProviderOrder struct {
 	} `json:"payments"`
 }
 type PurchaseStatus struct {
-	State string `json:"state"`
-	Order *Order `json:"order,omitempty"`
+	State   string           `json:"state"`
+	Order   *Order           `json:"order,omitempty"`
+	Receipt *PurchaseReceipt `json:"receipt,omitempty"`
+}
+
+// PurchaseReceipt reports the captured amount without exposing checkout credentials.
+type PurchaseReceipt struct {
+	TransactionID string `json:"transactionId"`
+	AmountMinor   int64  `json:"amountMinor"`
+	Currency      string `json:"currency"`
 }
 
 func (s *Service) checkoutOrder(p Payment) Order {
@@ -118,6 +126,11 @@ func (s *Service) RecoverPurchase(ctx context.Context, userID, analysisID string
 		return PurchaseStatus{}, err
 	}
 	if unlocked {
+		// Some historical unlocks have no canonical checkout record.
+		p, err := s.Repo.GetPurchase(ctx, userID, analysisID)
+		if err == nil && p.Status == StatusPaid {
+			return paidPurchaseStatus(p), nil
+		}
 		return PurchaseStatus{State: "paid"}, nil
 	}
 	p, err := s.Repo.GetPurchase(ctx, userID, analysisID)
@@ -138,8 +151,14 @@ func (s *Service) RecoverPurchase(ctx context.Context, userID, analysisID string
 		return PurchaseStatus{}, err
 	}
 	if p.Status == StatusPaid {
-		return PurchaseStatus{State: "paid"}, nil
+		return paidPurchaseStatus(p), nil
 	}
 	order := s.checkoutOrder(p)
 	return PurchaseStatus{State: "ready", Order: &order}, nil
+}
+
+func paidPurchaseStatus(p Payment) PurchaseStatus {
+	return PurchaseStatus{State: "paid", Receipt: &PurchaseReceipt{
+		TransactionID: p.ID, AmountMinor: p.AmountMinor, Currency: p.Currency,
+	}}
 }

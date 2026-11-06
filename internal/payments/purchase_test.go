@@ -144,6 +144,14 @@ func TestRecoveryConfirmsCapturedPaymentWithoutCheckoutProof(t *testing.T) {
 	if unlocked, _ := svc.IsUnlocked(ctx, "google:u1", "a1"); !unlocked {
 		t.Fatal("capture not applied")
 	}
+	if state.Receipt == nil || state.Receipt.AmountMinor != 49900 || state.Receipt.Currency != "INR" || state.Receipt.TransactionID == "" {
+		t.Fatalf("missing authoritative receipt: %+v", state.Receipt)
+	}
+	repeat, err := svc.RecoverPurchase(ctx, "google:u1", "a1")
+	if err != nil || repeat.Receipt == nil || *repeat.Receipt != *state.Receipt {
+		t.Fatalf("recovery must keep the same transaction reference: %+v %v", repeat, err)
+	}
+
 	if _, err := svc.CreateOrder(ctx, "google:u1", "a1", "INR"); !errors.Is(err, ErrAlreadyUnlocked) {
 		t.Fatal(err)
 	}
