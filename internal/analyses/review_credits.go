@@ -110,3 +110,27 @@ func (h *Handler) useReviewCredit(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+// paidCreditStatus describes only the credit attached to this owner's review.
+func (r *PGRepo) paidCreditStatus(ctx context.Context, a Analysis) (string, error) {
+	var status string
+	switch a.Status {
+	case StatusFailed:
+		status = "returned"
+	case StatusQueued, StatusProcessing:
+		status = "reserved"
+	default:
+		return "", nil
+	}
+	var found bool
+	err := r.DB.QueryRowContext(ctx, `
+SELECT EXISTS (
+ SELECT 1 FROM review_credit_uses u JOIN payments p ON p.id=u.payment_id
+ WHERE u.analysis_id=$1 AND u.user_id=$2 AND p.user_id=$2 AND p.status='paid'
+   AND ($3='returned' OR u.released_at IS NULL)
+)`, a.ID, a.UserID, status).Scan(&found)
+	if err != nil || !found {
+		return "", err
+	}
+	return status, nil
+}

@@ -222,6 +222,11 @@ func (h *Handler) getAnalysis(c *gin.Context) {
 		"status": analysis.Status,
 		"mode":   analysis.Mode,
 	}
+	if repo, ok := h.Svc.Repo.(*PGRepo); ok {
+		if credit, err := repo.paidCreditStatus(c.Request.Context(), analysis); err == nil && credit != "" {
+			resp["paidReviewCredit"] = credit
+		}
+	}
 	if analysis.StartedAt != nil {
 		resp["startedAt"] = analysis.StartedAt
 	}
