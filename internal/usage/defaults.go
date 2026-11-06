@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	GuestMonthlyAnalysisLimit    = 3
-	FreeUserMonthlyAnalysisLimit = 15
+	GuestMonthlyAnalysisLimit    = 1
+	FreeUserMonthlyAnalysisLimit = 3
 
 	PlanGuest   = "Guest"
 	PlanStarter = "Starter"

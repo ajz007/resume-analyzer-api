@@ -72,7 +72,7 @@ On the HTTP Lambda, set:
 | `RAZORPAY_KEY_ID` | live key id (`rzp_live_...`) |
 | `RAZORPAY_KEY_SECRET` | live key secret |
 | `RAZORPAY_WEBHOOK_SECRET` | live webhook secret |
-| `PRICE_INR_PAISE` | e.g. `49900` (₹499) |
+| `PRICE_INR_PAISE` | e.g. `16900` (₹169) |
 | `PRICE_USD_CENTS` | e.g. `900` ($9) |
 | `PAYWALL_ENABLED` | `true`, set this last |
 

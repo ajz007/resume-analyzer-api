@@ -8,6 +8,7 @@ import (
 
 	"resume-backend/internal/analyses"
 	"resume-backend/internal/documents"
+	"resume-backend/internal/usage"
 )
 
 type Service struct {
@@ -64,6 +65,12 @@ func claimWithTx(ctx context.Context, db *sql.DB, guestUserID, authedUserID stri
 		return ClaimResult{}, err
 	}
 	analysisCount, _ := analysisRes.RowsAffected()
+
+	if analysisCount > 0 {
+		if err := usage.NewPGStore(db).ClaimAnalysisReservationsTx(ctx, tx, guestUserID, authedUserID); err != nil {
+			return ClaimResult{}, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return ClaimResult{}, err

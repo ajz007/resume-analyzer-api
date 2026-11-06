@@ -135,7 +135,7 @@ func TestReviewPatchOperations(t *testing.T) {
 
 func TestV3PaywallIsAnAllowlistAndDoesNotMutate(t *testing.T) {
 	r := reviewFixture(t)
-	r.Report.Questions[0].Question = "PRIVATE QUESTION"
+	r.Report.Questions = append(r.Report.Questions, ReviewQuestion{Question: "PRIVATE QUESTION"})
 	raw, _ := json.Marshal(r)
 	var original map[string]any
 	_ = json.Unmarshal(raw, &original)

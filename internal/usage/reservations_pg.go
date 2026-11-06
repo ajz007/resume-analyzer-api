@@ -102,3 +102,33 @@ func (s *pgStore) reconcileReservations(ctx context.Context, tx *sql.Tx, userID 
 	}
 	return u, nil
 }
+
+// ClaimAnalysisReservationsTx carries current preview usage over with the
+// claimed analyses. The guest counter is retained so claiming cannot refill it.
+func (s *pgStore) ClaimAnalysisReservationsTx(ctx context.Context, tx *sql.Tx, guestID, accountID string) error {
+	guest, err := s.lockAndEnsure(ctx, tx, guestID)
+	if err != nil {
+		return err
+	}
+	account, err := s.lockAndEnsure(ctx, tx, accountID)
+	if err != nil {
+		return err
+	}
+	moved, err := tx.ExecContext(ctx, `
+UPDATE analysis_usage_reservations r
+SET user_id=$2, resets_at=$5, usage_epoch=$6
+FROM analyses a
+WHERE a.id=r.analysis_id AND a.user_id=$2 AND a.deleted_at IS NULL
+  AND r.user_id=$1 AND r.resets_at=$3 AND r.usage_epoch=$4
+  AND r.state IN ('reserved','committed') AND r.resets_at=$5`,
+		guestID, accountID, guest.ResetsAt, guest.Epoch, account.ResetsAt, account.Epoch)
+	if err != nil {
+		return err
+	}
+	count, err := moved.RowsAffected()
+	if err != nil || count == 0 {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE usage SET used=used+$2 WHERE user_id=$1`, accountID, count)
+	return err
+}
