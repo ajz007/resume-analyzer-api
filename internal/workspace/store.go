@@ -24,6 +24,7 @@ type Application struct {
 	JobExcerpt     string    `json:"jobExcerpt"`
 	Mode           string    `json:"mode"`
 	Status         string    `json:"status"`
+	RecheckStatus  string    `json:"recheckStatus,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	Labels
 }

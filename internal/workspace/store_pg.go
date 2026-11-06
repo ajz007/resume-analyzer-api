@@ -50,10 +50,15 @@ func (s *PGStore) List(ctx context.Context, user, q string, limit, offset int) (
 	// Treat search as literal text, including %, _ and backslash, rather than SQL patterns.
 	pattern := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(q) + "%"
 	rows, err := s.DB.QueryContext(ctx, `SELECT a.id,a.document_id,COALESCE(d.file_name,''),LEFT(COALESCE(a.job_description,''),240),
- COALESCE(a.mode,'job_match'),a.status,a.created_at,COALESCE(l.company_name,''),COALESCE(l.target_role,'')
+ COALESCE(a.mode,'job_match'),a.status,a.created_at,COALESCE(l.company_name,''),COALESCE(l.target_role,''),COALESCE(recheck.status,'')
  FROM analyses a
  LEFT JOIN documents d ON d.id=a.document_id AND d.user_id=a.user_id AND d.deleted_at IS NULL
  LEFT JOIN application_labels l ON l.analysis_id=a.id
+ LEFT JOIN LATERAL (
+   SELECT child.status FROM analyses child
+   WHERE child.recheck_of=a.id AND child.user_id=a.user_id AND child.deleted_at IS NULL
+   ORDER BY child.created_at DESC, child.id DESC LIMIT 1
+ ) recheck ON true
  WHERE a.user_id=$1 AND a.deleted_at IS NULL AND a.recheck_of IS NULL AND ($2='' OR
  COALESCE(l.company_name,'') ILIKE $3 OR COALESCE(l.target_role,'') ILIKE $3 OR
  COALESCE(d.file_name,'') ILIKE $3 OR LEFT(COALESCE(a.job_description,''),240) ILIKE $3)
@@ -65,7 +70,7 @@ func (s *PGStore) List(ctx context.Context, user, q string, limit, offset int) (
 	out := []Application{}
 	for rows.Next() {
 		var a Application
-		if err := rows.Scan(&a.AnalysisID, &a.DocumentID, &a.ResumeFileName, &a.JobExcerpt, &a.Mode, &a.Status, &a.CreatedAt, &a.CompanyName, &a.TargetRole); err != nil {
+		if err := rows.Scan(&a.AnalysisID, &a.DocumentID, &a.ResumeFileName, &a.JobExcerpt, &a.Mode, &a.Status, &a.CreatedAt, &a.CompanyName, &a.TargetRole, &a.RecheckStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
