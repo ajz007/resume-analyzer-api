@@ -229,7 +229,11 @@ func TestPGBudgetAdmissionRollbackLeavesNoPartialHold(t *testing.T) {
 }
 func TestBudgetPreparationCapsOutputAndRejectsUnsafeInputs(t *testing.T) {
 	p := spendPolicy{RequestBytes: 262144, OutputTokens: 32768}
-	raw, reserve, err := prepareRequest([]byte(budgetRequest), p, "gpt-6.1-sol")
+	request := strings.Replace(budgetRequest, `"messages":[`, `"messages":[{"role":"developer","content":"Use the review schema."},`, 1)
+	if request == budgetRequest {
+		t.Fatal("test request did not include the developer message")
+	}
+	raw, reserve, err := prepareRequest([]byte(request), p, "gpt-6.1-sol")
 	if err != nil || reserve <= 0 {
 		t.Fatal(err)
 	}
