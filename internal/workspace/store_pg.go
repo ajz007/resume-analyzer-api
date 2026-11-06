@@ -35,14 +35,14 @@ func (s *PGStore) SetPrimary(ctx context.Context, user, id string) error {
 }
 func (s *PGStore) GetLabels(ctx context.Context, id string) (Labels, error) {
 	var l Labels
-	err := s.DB.QueryRowContext(ctx, `SELECT company_name,target_role FROM application_labels WHERE analysis_id=$1`, id).Scan(&l.CompanyName, &l.TargetRole)
+	err := s.DB.QueryRowContext(ctx, `SELECT company_name,target_role FROM application_labels WHERE analysis_id=COALESCE((SELECT recheck_of FROM analyses WHERE id=$1),$1)`, id).Scan(&l.CompanyName, &l.TargetRole)
 	if errors.Is(err, sql.ErrNoRows) {
 		return l, nil
 	}
 	return l, err
 }
 func (s *PGStore) SaveLabels(ctx context.Context, id string, l Labels) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO application_labels(analysis_id,company_name,target_role) VALUES($1,$2,$3)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO application_labels(analysis_id,company_name,target_role) VALUES(COALESCE((SELECT recheck_of FROM analyses WHERE id=$1),$1),$2,$3)
  ON CONFLICT(analysis_id) DO UPDATE SET company_name=EXCLUDED.company_name,target_role=EXCLUDED.target_role,updated_at=now()`, id, l.CompanyName, l.TargetRole)
 	return err
 }
@@ -54,7 +54,7 @@ func (s *PGStore) List(ctx context.Context, user, q string, limit, offset int) (
  FROM analyses a
  LEFT JOIN documents d ON d.id=a.document_id AND d.user_id=a.user_id AND d.deleted_at IS NULL
  LEFT JOIN application_labels l ON l.analysis_id=a.id
- WHERE a.user_id=$1 AND a.deleted_at IS NULL AND ($2='' OR
+ WHERE a.user_id=$1 AND a.deleted_at IS NULL AND a.recheck_of IS NULL AND ($2='' OR
  COALESCE(l.company_name,'') ILIKE $3 OR COALESCE(l.target_role,'') ILIKE $3 OR
  COALESCE(d.file_name,'') ILIKE $3 OR LEFT(COALESCE(a.job_description,''),240) ILIKE $3)
  ORDER BY a.created_at DESC,a.id DESC LIMIT $4 OFFSET $5`, user, q, pattern, limit, offset)

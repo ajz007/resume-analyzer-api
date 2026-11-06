@@ -54,8 +54,8 @@ func (r *PGRepo) getOrCreateForDocument(ctx context.Context, analysis Analysis, 
 	if mode == "" {
 		mode = ModeJobMatch
 	}
-	latest, err := getLatestForDocument(ctx, tx, analysis.UserID, analysis.DocumentID, mode, analysis.JobDescription)
-	if err == nil && !compatibleAnalysis(latest, analysis) {
+	latest, err := getLatestForDocument(ctx, tx, analysis.UserID, analysis.DocumentID, mode, analysis.JobDescription, analysis.RecheckOf)
+	if err == nil && analysis.RecheckOf == "" && !compatibleAnalysis(latest, analysis) {
 		err = sql.ErrNoRows
 	}
 	if err == nil {
@@ -689,9 +689,9 @@ func createWithTx(ctx context.Context, tx *sql.Tx, analysis Analysis) error {
 	const query = `
 INSERT INTO analyses (
 	id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
-	job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model, created_at
+	job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model, created_at, recheck_of
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')::uuid)`
 
 	rawPayload, err := marshalJSONB(analysis.AnalysisRaw)
 	if err != nil {
@@ -723,13 +723,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 		analysis.Provider,
 		analysis.Model,
 		analysis.CreatedAt,
+		analysis.RecheckOf,
 	)
 	return err
 }
 
 // getLatestForDocument returns the latest analysis for a document that was run with the
 // same mode and job description, so a cached result is never reused across modes or JDs.
-func getLatestForDocument(ctx context.Context, q queryer, userID, documentID string, analysisMode AnalysisMode, jd string) (Analysis, error) {
+func getLatestForDocument(ctx context.Context, q queryer, userID, documentID string, analysisMode AnalysisMode, jd, recheckOf string) (Analysis, error) {
 	const query = `
 SELECT id, document_id, user_id, status, result, analysis_raw, analysis_result, analysis_completed_at,
        job_description, prompt_version, mode, analysis_version, prompt_hash, provider, model,
@@ -738,6 +739,7 @@ FROM analyses
 WHERE document_id = $1 AND user_id = $2 AND deleted_at IS NULL
   AND COALESCE(NULLIF(mode, ''), 'JOB_MATCH') = $3
   AND COALESCE(job_description, '') = $4
+  AND recheck_of IS NOT DISTINCT FROM NULLIF($5, '')::uuid
 ORDER BY created_at DESC
 LIMIT 1`
 
@@ -759,7 +761,7 @@ LIMIT 1`
 	var startedAt sql.NullTime
 	var completedAt sql.NullTime
 
-	err := q.QueryRowContext(ctx, query, documentID, userID, string(analysisMode), jd).Scan(
+	err := q.QueryRowContext(ctx, query, documentID, userID, string(analysisMode), jd, recheckOf).Scan(
 		&a.ID,
 		&a.DocumentID,
 		&a.UserID,

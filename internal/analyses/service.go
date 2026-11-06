@@ -67,7 +67,8 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 	}
 
 	analysis := Analysis{
-		ID:              uuid.NewString(),
+		ID: uuid.NewString(),
+
 		DocumentID:      documentID,
 		UserID:          userID,
 		JobDescription:  jobDescription,
@@ -114,6 +115,10 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 }
 
 func (s *Service) startOrReuse(ctx context.Context, documentID, userID, jobDescription, promptVersion string, mode AnalysisMode, allowRetry, useCredit bool) (Analysis, bool, error) {
+	return s.startLinkedReview(ctx, documentID, userID, jobDescription, promptVersion, mode, allowRetry, useCredit, "")
+}
+
+func (s *Service) startLinkedReview(ctx context.Context, documentID, userID, jobDescription, promptVersion string, mode AnalysisMode, allowRetry, useCredit bool, recheckOf string) (Analysis, bool, error) {
 	if documentID == "" || userID == "" {
 		return Analysis{}, false, errors.New("documentID and userID are required")
 	}
@@ -123,6 +128,7 @@ func (s *Service) startOrReuse(ctx context.Context, documentID, userID, jobDescr
 	}
 
 	analysis := Analysis{
+		RecheckOf:       recheckOf,
 		ID:              uuid.NewString(),
 		DocumentID:      documentID,
 		UserID:          userID,
