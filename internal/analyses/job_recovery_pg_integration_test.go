@@ -519,6 +519,18 @@ func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
 	if code != 202 || first == "" {
 		t.Fatal("paid review was not admitted")
 	}
+	checkCredit := func(id, want string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest("GET", "/analyses/"+id, nil))
+		var result struct {
+			PaidReviewCredit string `json:"paidReviewCredit"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 || result.PaidReviewCredit != want {
+			t.Fatalf("expected credit %q, got status %d: %s", want, w.Code, w.Body.String())
+		}
+	}
+	checkCredit(first, "reserved")
 	if retry, same := run("a"); retry != 202 || same != first || q.calls.Load() != 1 {
 		t.Fatalf("retry did not reuse paid review: %d %s", retry, same)
 	}
@@ -535,10 +547,12 @@ func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
 	if _, err := db.Exec(`UPDATE analyses SET status='failed' WHERE id=$1`, first); err != nil {
 		t.Fatal(err)
 	}
+	checkCredit(first, "returned")
 	code, second := run("b")
 	if code != 202 || second == "" || first == second {
 		t.Fatal("failed review did not release the credit")
 	}
+	checkCredit(first, "returned")
 	if unlocked, err := payRepo.IsUnlocked(ctx, "user", second); err != nil || !unlocked {
 		t.Fatalf("paid review not unlocked: %v %v", unlocked, err)
 	}
@@ -575,6 +589,7 @@ func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
 	if err := payRepo.MarkRefunded(ctx, "credit-capture"); err != nil {
 		t.Fatal(err)
 	}
+	checkCredit(first, "")
 	if unlocked, err := payRepo.IsUnlocked(ctx, "user", preview); err != nil || unlocked {
 		t.Fatalf("refunded credit still grants access: %v %v", unlocked, err)
 	}
