@@ -30,6 +30,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/documents/from-s3", h.createFromS3)
 	rg.GET("/documents/current", h.current)
 	rg.GET("/documents", h.list)
+	rg.GET("/documents/:id/tailored-download", h.downloadTailored)
 }
 
 func (h *Handler) upload(c *gin.Context) {
@@ -60,7 +61,7 @@ func (h *Handler) upload(c *gin.Context) {
 		return
 	}
 
-	respond.JSON(c, http.StatusCreated, toResponse(doc))
+	respond.JSON(c, http.StatusCreated, ToResponse(doc))
 }
 
 type createFromS3Request struct {
@@ -111,7 +112,7 @@ func (h *Handler) createFromS3(c *gin.Context) {
 		return
 	}
 
-	respond.JSON(c, http.StatusCreated, toResponse(doc))
+	respond.JSON(c, http.StatusCreated, ToResponse(doc))
 }
 
 func (h *Handler) current(c *gin.Context) {
@@ -130,7 +131,7 @@ func (h *Handler) current(c *gin.Context) {
 		return
 	}
 
-	respond.JSON(c, http.StatusOK, toResponse(doc))
+	respond.JSON(c, http.StatusOK, ToResponse(doc))
 }
 
 func (h *Handler) list(c *gin.Context) {

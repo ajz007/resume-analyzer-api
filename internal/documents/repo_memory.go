@@ -27,6 +27,13 @@ func (r *MemoryRepo) Create(ctx context.Context, doc Document) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if doc.TailoredAnalysisID != "" {
+		for _, existing := range r.data[doc.UserID] {
+			if existing.ID == doc.ID {
+				return nil
+			}
+		}
+	}
 	r.data[doc.UserID] = append(r.data[doc.UserID], doc)
 	return nil
 }
@@ -42,7 +49,12 @@ func (r *MemoryRepo) GetCurrentByUser(ctx context.Context, userId string) (Docum
 	if !ok || len(docs) == 0 {
 		return Document{}, ErrNotFound
 	}
-	return docs[len(docs)-1], nil
+	for i := len(docs) - 1; i >= 0; i-- {
+		if docs[i].TailoredAnalysisID == "" {
+			return docs[i], nil
+		}
+	}
+	return Document{}, ErrNotFound
 }
 
 // GetByID returns a document by ID for a user.
@@ -96,16 +108,14 @@ func (r *MemoryRepo) ListByUser(ctx context.Context, userId string, limit, offse
 	}
 
 	r.mu.RLock()
-	userDocs := r.data[userId]
+	docs := append([]Document(nil), r.data[userId]...)
 	r.mu.RUnlock()
 
-	if len(userDocs) == 0 || offset >= len(userDocs) {
+	if len(docs) == 0 || offset >= len(docs) {
 		return []Document{}, nil
 	}
 
-	// Copy and sort newest-first by CreatedAt.
-	docs := make([]Document, len(userDocs))
-	copy(docs, userDocs)
+	// Sort newest-first by CreatedAt.
 	sort.Slice(docs, func(i, j int) bool {
 		return docs[i].CreatedAt.After(docs[j].CreatedAt)
 	})

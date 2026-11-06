@@ -423,6 +423,10 @@ func buildServices(app *App) error {
 	app.PaymentsHandler = payments.NewHandler(app.PaymentsService)
 	app.AnalysisHandler = analyses.NewHandler(analysisSvc, docRepo)
 	app.AnalysisHandler.Unlocks = app.PaymentsService
+	app.AnalysisHandler.TailoredName = func(ctx context.Context, analysisID string) (string, error) {
+		labels, err := workspaceStore.GetLabels(ctx, analysisID)
+		return strings.Trim(strings.Join([]string{labels.CompanyName, labels.TargetRole}, " · "), " ·"), err
+	}
 	app.ApplyHandler = applies.NewHandler(applySvc, generatedResumeRepo, app.Store)
 	app.AccountHandler = account.NewHandler(app.AccountService)
 	app.UsageHandler = usageHandler

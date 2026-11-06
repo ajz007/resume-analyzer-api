@@ -114,15 +114,22 @@ func (s *Store) SaveWithKey(ctx context.Context, storageKey string, contentType 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		return 0, fmt.Errorf("mkdir: %w", err)
 	}
-	f, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := os.CreateTemp(filepath.Dir(fullPath), ".object-*")
 	if err != nil {
 		return 0, fmt.Errorf("open file: %w", err)
 	}
-	defer f.Close()
+	defer os.Remove(f.Name())
 
 	written, err := io.Copy(f, r)
+	closeErr := f.Close()
 	if err != nil {
 		return 0, fmt.Errorf("write body: %w", err)
+	}
+	if closeErr != nil {
+		return 0, closeErr
+	}
+	if err := os.Rename(f.Name(), fullPath); err != nil {
+		return 0, err
 	}
 	_ = contentType
 	return written, nil

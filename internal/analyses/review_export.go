@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"resume-backend/internal/documents"
 	"resume-backend/internal/extract"
 	"strings"
 	"unicode"
@@ -119,24 +120,33 @@ func renderTextDOCX(text string) ([]byte, error) {
 }
 
 func (h *Handler) downloadReviewedResume(c *gin.Context) {
+	data, _, _ := h.renderReviewDownload(c)
+	if data == nil {
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="reviewed-resume.docx"`)
+	c.Data(http.StatusOK, documents.TailoredMIME, data)
+}
+
+func (h *Handler) renderReviewDownload(c *gin.Context) ([]byte, Analysis, documents.Document) {
 	userID := middleware.UserIDFromContext(c)
 	analysis, err := h.Svc.Get(c.Request.Context(), c.Param("id"))
 	if err != nil || analysis.UserID != userID {
 		c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	if analysis.Status != StatusCompleted {
 		c.JSON(http.StatusConflict, gin.H{"error": "report is not complete"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	_, locked, _, err := h.applyPaywall(c.Request.Context(), userID, analysis.ID, analysis.Result)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not verify report access"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	if locked {
 		c.JSON(http.StatusForbidden, gin.H{"error": "unlock the report before exporting"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	var request struct {
 		EditIDs       *[]string `json:"editIds"`
@@ -146,52 +156,51 @@ func (h *Handler) downloadReviewedResume(c *gin.Context) {
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid edit selection"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	state, stateErr := reviewState(analysis.Result)
 	if stateErr != nil || (state.Version > 0 && (request.ReviewVersion == nil || *request.ReviewVersion != state.Version)) {
 		c.JSON(http.StatusConflict, gin.H{"error": "review changed; reload before downloading"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	doc, err := h.DocRepo.GetByID(c.Request.Context(), userID, analysis.DocumentID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "source document not found"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	source, err := loadText(c.Request.Context(), h.Svc.Store, doc.ExtractedTextKey)
 	if err != nil || strings.TrimSpace(source) == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "original extracted text is unavailable"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
 	layoutText := source
 	if doc.StorageKey != "" {
 		file, openErr := h.Svc.Store.Open(c.Request.Context(), doc.StorageKey)
 		if openErr != nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "original document is unavailable for rebuilding the resume"})
-			return
+			return nil, Analysis{}, documents.Document{}
 		}
 		fileBytes, readErr := io.ReadAll(io.LimitReader(file, 25*1024*1024+1))
 		file.Close()
 		if readErr != nil || len(fileBytes) > 25*1024*1024 {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "original document could not be read"})
-			return
+			return nil, Analysis{}, documents.Document{}
 		}
 		originalText, originalErr := extract.ExtractTextFromBytes(c.Request.Context(), fileBytes, doc.MimeType, doc.FileName)
 		if originalErr != nil || canonicalReviewSource(originalText).Text != canonicalReviewSource(source).Text {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "original document no longer matches the analyzed resume"})
-			return
+			return nil, Analysis{}, documents.Document{}
 		}
 		layoutText, err = extract.ExtractReviewLayout(c.Request.Context(), fileBytes, doc.MimeType, doc.FileName)
 		if err != nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "original document layout could not be rebuilt safely"})
-			return
+			return nil, Analysis{}, documents.Document{}
 		}
 	}
 	data, err := RenderReviewedResume(source, analysis.Result, request.EditIDs, layoutText)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "edits could not be safely applied to the original text"})
-		return
+		return nil, Analysis{}, documents.Document{}
 	}
-	c.Header("Content-Disposition", `attachment; filename="reviewed-resume.docx"`)
-	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data)
+	return data, analysis, doc
 }

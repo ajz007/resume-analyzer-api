@@ -14,7 +14,7 @@ type PGRepo struct {
 
 // Create inserts a new document.
 func (r *PGRepo) Create(ctx context.Context, doc Document) error {
-	const query = `
+	query := `
 INSERT INTO documents (
     id,
     user_id,
@@ -26,8 +26,12 @@ INSERT INTO documents (
     storage_provider,
     storage_key,
     checksum,
-    created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10)`
+    created_at,
+    tailored_analysis_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, NULLIF($11, '')::uuid)`
+	if doc.TailoredAnalysisID != "" {
+		query += " ON CONFLICT (id) DO NOTHING"
+	}
 
 	originalName := doc.OriginalFilename
 	if originalName == "" {
@@ -60,6 +64,7 @@ INSERT INTO documents (
 		storageProvider,
 		storageKey,
 		doc.CreatedAt,
+		doc.TailoredAnalysisID,
 	)
 	return err
 }
@@ -67,9 +72,9 @@ INSERT INTO documents (
 // GetCurrentByUser returns the latest document for a user.
 func (r *PGRepo) GetCurrentByUser(ctx context.Context, userId string) (Document, error) {
 	const query = `
-SELECT id, user_id, file_name, original_filename, mime_type, content_type, size_bytes, storage_provider, storage_key, extracted_text_key, extracted_at, created_at
+SELECT id, user_id, file_name, original_filename, mime_type, content_type, size_bytes, storage_provider, storage_key, extracted_text_key, extracted_at, created_at, COALESCE(tailored_analysis_id::text, '')
 FROM documents
-WHERE user_id = $1 AND deleted_at IS NULL
+WHERE user_id = $1 AND deleted_at IS NULL AND tailored_analysis_id IS NULL
 ORDER BY created_at DESC
 LIMIT 1`
 	var doc Document
@@ -92,6 +97,7 @@ LIMIT 1`
 		&extractedKey,
 		&extractedAt,
 		&doc.CreatedAt,
+		&doc.TailoredAnalysisID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -123,7 +129,7 @@ LIMIT 1`
 // GetByID fetches a document by ID for a user.
 func (r *PGRepo) GetByID(ctx context.Context, userId, documentID string) (Document, error) {
 	const query = `
-SELECT id, user_id, file_name, original_filename, mime_type, content_type, size_bytes, storage_provider, storage_key, extracted_text_key, extracted_at, created_at
+SELECT id, user_id, file_name, original_filename, mime_type, content_type, size_bytes, storage_provider, storage_key, extracted_text_key, extracted_at, created_at, COALESCE(tailored_analysis_id::text, '')
 FROM documents
 WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
 LIMIT 1`
@@ -147,6 +153,7 @@ LIMIT 1`
 		&extractedKey,
 		&extractedAt,
 		&doc.CreatedAt,
+		&doc.TailoredAnalysisID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -187,7 +194,7 @@ func (r *PGRepo) ListByUser(ctx context.Context, userId string, limit, offset in
 		offset = 0
 	}
 	const query = `
-SELECT id, user_id, file_name, original_filename, mime_type, content_type, size_bytes, storage_provider, storage_key, extracted_text_key, extracted_at, created_at
+SELECT id, user_id, file_name, original_filename, mime_type, content_type, size_bytes, storage_provider, storage_key, extracted_text_key, extracted_at, created_at, COALESCE(tailored_analysis_id::text, '')
 FROM documents
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -221,6 +228,7 @@ LIMIT $2 OFFSET $3`
 			&extractedKey,
 			&extractedAt,
 			&doc.CreatedAt,
+			&doc.TailoredAnalysisID,
 		); err != nil {
 			return nil, err
 		}

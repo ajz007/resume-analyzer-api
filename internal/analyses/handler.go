@@ -1,6 +1,7 @@
 package analyses
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,8 +21,9 @@ import (
 
 // Handler wires HTTP handlers to the analyses service.
 type Handler struct {
-	Svc     *Service
-	DocRepo documents.DocumentsRepo
+	Svc          *Service
+	DocRepo      documents.DocumentsRepo
+	TailoredName func(context.Context, string) (string, error)
 	// Unlocks gates full reports behind a payment. Nil means no paywall.
 	Unlocks UnlockChecker
 }
@@ -41,6 +43,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/analyses/:id", h.getAnalysis)
 	rg.POST("/analyses/:id/use-review-credit", h.useReviewCredit)
 	rg.POST("/analyses/:id/reviewed-resume", h.downloadReviewedResume)
+	rg.POST("/analyses/:id/tailored-resumes", h.saveTailoredResume)
+	rg.GET("/analyses/:id/tailored-resumes", h.listTailoredResumes)
+	rg.POST("/analyses/:id/tailored-resumes/preview", h.previewTailoredResume)
 	rg.GET("/analyses/:id/review-session", h.getReviewSession)
 	rg.PUT("/analyses/:id/review-session/choices", h.saveReviewChoices)
 	rg.POST("/analyses/:id/review-session/answers", h.answerReviewQuestion)
