@@ -14,7 +14,9 @@ import (
 	"resume-backend/internal/documents"
 	"resume-backend/internal/extract"
 	"resume-backend/internal/shared/server/middleware"
+	"resume-backend/internal/shared/server/respond"
 	"resume-backend/internal/shared/storage/object"
+	"resume-backend/internal/shared/telemetry"
 	"resume-backend/internal/shared/util"
 )
 
@@ -36,7 +38,7 @@ func (h *Handler) saveTailoredResume(c *gin.Context) {
 		return
 	}
 	if !errors.Is(err, documents.ErrNotFound) {
-		c.Status(http.StatusInternalServerError)
+		tailoredSaveError(c, "lookup", err)
 		return
 	}
 
@@ -44,17 +46,17 @@ func (h *Handler) saveTailoredResume(c *gin.Context) {
 	if h.TailoredName != nil {
 		label, err := h.TailoredName(ctx, analysis.ID)
 		if err != nil {
-			c.Status(http.StatusInternalServerError)
+			tailoredSaveError(c, "labels", err)
 			return
 		}
 		if label != "" {
 			name = label
 		}
 	}
-	key := path.Join(util.HashUserKey(analysis.UserID), "tailored", id+".docx")
+	key := tailoredStorageKey(source, id)
 	size, err := saveTailoredObject(ctx, h.Svc.Store, key, data)
 	if err != nil {
-		c.Status(http.StatusInternalServerError)
+		tailoredSaveError(c, "storage", err)
 		return
 	}
 	doc = documents.Document{
@@ -63,16 +65,37 @@ func (h *Handler) saveTailoredResume(c *gin.Context) {
 		StorageProvider: source.StorageProvider, StorageKey: key, CreatedAt: time.Now().UTC(),
 	}
 	if err := h.DocRepo.Create(ctx, doc); err != nil {
-		c.Status(http.StatusInternalServerError)
+		tailoredSaveError(c, "insert", err)
 		return
 	}
 	// Read back the winning row when two identical saves race.
 	doc, err = h.DocRepo.GetByID(ctx, analysis.UserID, id)
 	if err != nil {
-		c.Status(http.StatusInternalServerError)
+		tailoredSaveError(c, "readback", err)
 		return
 	}
 	c.JSON(http.StatusOK, documents.ToResponse(doc))
+}
+
+func tailoredStorageKey(source documents.Document, id string) string {
+	dir := path.Dir(source.StorageKey)
+	if dir == "." {
+		dir = util.HashUserKey(source.UserID)
+	}
+	return path.Join(dir, "tailored-"+id+".docx")
+}
+
+func tailoredSaveError(c *gin.Context, stage string, err error) {
+	fields := map[string]any{"stage": stage, "request_id": middleware.RequestIDFromContext(c)}
+	var awsError interface{ ErrorCode() string }
+	var dbError interface{ SQLState() string }
+	if errors.As(err, &awsError) {
+		fields["code"] = awsError.ErrorCode()
+	} else if errors.As(err, &dbError) {
+		fields["code"] = dbError.SQLState()
+	}
+	telemetry.Error("tailored_resume.save_failed", fields)
+	respond.Error(c, http.StatusInternalServerError, "tailored_save_failed", "Could not save this resume version. Your edit choices are still available.", nil)
 }
 
 func saveTailoredObject(ctx context.Context, store object.ObjectStore, key string, data []byte) (int64, error) {
@@ -122,5 +145,10 @@ func (h *Handler) previewTailoredResume(c *gin.Context) {
 		c.Status(http.StatusUnprocessableEntity)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"text": text})
+	blocks, err := previewDOCXBlocks(data)
+	if err != nil {
+		c.Status(http.StatusUnprocessableEntity)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"text": text, "blocks": blocks})
 }

@@ -135,6 +135,16 @@ func (s *Store) SaveWithKey(ctx context.Context, storageKey string, contentType 
 		Body:        counter,
 		ContentType: aws.String(contentType),
 	}
+	// Keep bounded readers seekable so the SDK can sign and retry the upload.
+	var knownSize *int64
+	if reader, ok := r.(interface {
+		io.ReadSeeker
+		Len() int
+	}); ok {
+		knownSize = aws.Int64(int64(reader.Len()))
+		input.Body = reader
+		input.ContentLength = knownSize
+	}
 	if s.kmsKeyID != "" {
 		input.ServerSideEncryption = s3types.ServerSideEncryptionAwsKms
 		input.SSEKMSKeyId = aws.String(s.kmsKeyID)
@@ -144,6 +154,9 @@ func (s *Store) SaveWithKey(ctx context.Context, storageKey string, contentType 
 
 	if _, err := s.client.PutObject(ctx, input); err != nil {
 		return 0, fmt.Errorf("s3 put object bucket=%s key=%s: %w", s.bucket, objectKey, err)
+	}
+	if knownSize != nil {
+		return *knownSize, nil
 	}
 	return counter.n, nil
 }
