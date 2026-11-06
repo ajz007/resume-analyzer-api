@@ -594,3 +594,71 @@ func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
 		t.Fatalf("refunded credit still grants access: %v %v", unlocked, err)
 	}
 }
+
+func TestPGSameJobRecheckReusesCreditAndKeepsOriginal(t *testing.T) {
+	svc, _, q, db, originalDoc := recoveryService(t)
+	ctx := context.Background()
+	original, tailored, credit := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	jd := strings.Repeat("original job description ", 20)
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO analyses(id,document_id,user_id,status,mode,job_description) VALUES($1,$2,'user','completed','JOB_MATCH',$3)`, []any{original, originalDoc, jd}},
+		{`INSERT INTO documents(id,user_id,file_name,mime_type,size_bytes,tailored_analysis_id) VALUES($1,'user','tailored.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',10,$2)`, []any{tailored, original}},
+		{`INSERT INTO review_credit_orders(id,user_id) VALUES($1,'user')`, []any{credit}},
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt.query, stmt.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payRepo := &payments.PGRepo{DB: db}
+	for _, payment := range []struct{ id, order string }{{original, "original-order"}, {credit, "recheck-credit"}} {
+		if err := payRepo.Create(ctx, payments.Payment{ID: uuid.NewString(), AnalysisID: payment.id, UserID: "user", Status: payments.StatusCreated, RazorpayOrderID: payment.order, Currency: "INR", AmountMinor: 16900, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := payRepo.MarkPaidAndUnlock(ctx, payment.order, payment.order+"-capture"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := analyses.NewHandler(svc, &documents.PGRepo{DB: db})
+	h.Unlocks = &payments.Service{Repo: payRepo, Enabled: true, KeyID: "test", KeySecret: "test"}
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("userId", "user") })
+	h.RegisterRoutes(router.Group(""))
+	path := "/analyses/" + original + "/rechecks"
+	call := func(method, path, document string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"documentId": document})
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(string(body))))
+		return w
+	}
+	if w := call("POST", path, originalDoc); w.Code != 404 {
+		t.Fatal("accepted an unrelated source", w.Code)
+	}
+	var reply struct {
+		AnalysisID string `json:"analysisId"`
+	}
+	for i := 0; i < 2; i++ {
+		w := call("POST", path, tailored)
+		var next struct {
+			AnalysisID string `json:"analysisId"`
+		}
+		if w.Code != 202 || json.Unmarshal(w.Body.Bytes(), &next) != nil || next.AnalysisID == "" {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if i == 0 {
+			reply.AnalysisID = next.AnalysisID
+		} else if next.AnalysisID != reply.AnalysisID {
+			t.Fatal("recheck was duplicated")
+		}
+	}
+	var gotJD, gotParent string
+	if err := db.QueryRow(`SELECT job_description,recheck_of FROM analyses WHERE id=$1`, reply.AnalysisID).Scan(&gotJD, &gotParent); err != nil || gotJD != jd || gotParent != original || q.calls.Load() != 1 {
+		t.Fatal("recheck did not retain job and original review linkage", gotJD, gotParent, err)
+	}
+	if w := call("GET", path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), reply.AnalysisID) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

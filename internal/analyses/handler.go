@@ -45,6 +45,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/analyses/:id/reviewed-resume", h.downloadReviewedResume)
 	rg.POST("/analyses/:id/tailored-resumes", h.saveTailoredResume)
 	rg.GET("/analyses/:id/tailored-resumes", h.listTailoredResumes)
+	rg.GET("/analyses/:id/rechecks", h.listRechecks)
+	rg.POST("/analyses/:id/rechecks", h.startRecheck)
 	rg.POST("/analyses/:id/tailored-resumes/preview", h.previewTailoredResume)
 	rg.GET("/analyses/:id/review-session", h.getReviewSession)
 	rg.PUT("/analyses/:id/review-session/choices", h.saveReviewChoices)

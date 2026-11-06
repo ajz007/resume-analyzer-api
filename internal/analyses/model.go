@@ -4,6 +4,7 @@ import "time"
 
 // Analysis represents a document analysis job.
 type Analysis struct {
+	RecheckOf           string         `json:"-"`
 	ID                  string         `json:"id"`
 	DocumentID          string         `json:"documentId"`
 	UserID              string         `json:"userId"`
