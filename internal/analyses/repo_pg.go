@@ -868,7 +868,10 @@ func (r *PGRepo) finalizedOrNotFound(ctx context.Context, analysisID string) err
 
 func (r *PGRepo) ClaimProcessing(ctx context.Context, id string, startedAt time.Time) (bool, error) {
 	result, err := r.DB.ExecContext(ctx, `UPDATE analyses a SET status='processing',started_at=$2,updated_at=now() WHERE a.id=$1 AND a.status='queued' AND a.started_at IS NULL AND a.deleted_at IS NULL
- AND (NOT $3::boolean OR EXISTS(SELECT 1 FROM analysis_usage_reservations u WHERE u.analysis_id=a.id AND u.state='reserved'))`, id, startedAt, r.DurableJobs())
+ AND (NOT $3::boolean
+ OR EXISTS(SELECT 1 FROM analysis_usage_reservations u WHERE u.analysis_id=a.id AND u.state='reserved')
+ OR EXISTS(SELECT 1 FROM review_credit_uses u JOIN payments p ON p.id=u.payment_id
+ WHERE u.analysis_id=a.id AND u.user_id=a.user_id AND p.user_id=a.user_id AND u.released_at IS NULL AND p.status='paid'))`, id, startedAt, r.DurableJobs())
 	if err != nil {
 		return false, err
 	}

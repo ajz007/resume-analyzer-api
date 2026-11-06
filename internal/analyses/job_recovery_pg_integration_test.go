@@ -472,7 +472,7 @@ func TestPGJobProcessingClaimCannotBeReusedAfterStatusReset(t *testing.T) {
 }
 
 func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
-	svc, _, q, db, doc := recoveryService(t)
+	svc, repo, q, db, doc := recoveryService(t)
 	ctx := context.Background()
 	if _, err := svc.Usage.Consume(ctx, "user", usage.FreeUserMonthlyAnalysisLimit); err != nil {
 		t.Fatal(err)
@@ -525,6 +525,12 @@ func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
 	if code, _ := run("b"); code != 409 {
 		t.Fatal("one credit funded two active reviews")
 	}
+	if claimed, err := repo.ClaimProcessing(ctx, first, time.Now()); err != nil || !claimed {
+		t.Fatalf("worker could not claim a paid review: %v %v", claimed, err)
+	}
+	if claimed, err := repo.ClaimProcessing(ctx, first, time.Now()); err != nil || claimed {
+		t.Fatalf("worker claimed the same paid review twice: %v %v", claimed, err)
+	}
 	assertUsage(t, svc, usage.FreeUserMonthlyAnalysisLimit)
 	if _, err := db.Exec(`UPDATE analyses SET status='failed' WHERE id=$1`, first); err != nil {
 		t.Fatal(err)
@@ -535,6 +541,16 @@ func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
 	}
 	if unlocked, err := payRepo.IsUnlocked(ctx, "user", second); err != nil || !unlocked {
 		t.Fatalf("paid review not unlocked: %v %v", unlocked, err)
+	}
+	if _, err := db.Exec(`UPDATE payments SET status='refunded' WHERE razorpay_order_id='credit-order'`); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := repo.ClaimProcessing(ctx, second, time.Now()); err != nil || claimed {
+		t.Fatalf("worker claimed a review funded by a refunded payment: %v %v", claimed, err)
+	}
+	// Restore the fixture for the existing saved-preview and refund assertions.
+	if _, err := db.Exec(`UPDATE payments SET status='paid' WHERE razorpay_order_id='credit-order'`); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := db.Exec(`UPDATE analyses SET status='failed' WHERE id=$1`, second); err != nil {
 		t.Fatal(err)
