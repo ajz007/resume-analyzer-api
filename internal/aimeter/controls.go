@@ -90,7 +90,9 @@ func prepareRequest(raw []byte, p spendPolicy, model string) ([]byte, int64, err
 		if json.Unmarshal(m["content"], &content) != nil || json.Unmarshal(m["role"], &role) != nil {
 			return nil, 0, &ControlError{Code: CodeInputLimit}
 		}
-		if role != "system" && role != "user" && role != "assistant" {
+		switch role {
+		case "system", "developer", "user", "assistant":
+		default:
 			return nil, 0, &ControlError{Code: CodeInputLimit}
 		}
 	}
