@@ -110,6 +110,10 @@ func (s *Service) Create(ctx context.Context, documentID, userID, jobDescription
 
 // StartOrReuse enqueues a new analysis or reuses an existing one for idempotent requests.
 func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescription, promptVersion string, mode AnalysisMode, allowRetry bool) (Analysis, bool, error) {
+	return s.startOrReuse(ctx, documentID, userID, jobDescription, promptVersion, mode, allowRetry, false)
+}
+
+func (s *Service) startOrReuse(ctx context.Context, documentID, userID, jobDescription, promptVersion string, mode AnalysisMode, allowRetry, useCredit bool) (Analysis, bool, error) {
 	if documentID == "" || userID == "" {
 		return Analysis{}, false, errors.New("documentID and userID are required")
 	}
@@ -130,6 +134,18 @@ func (s *Service) StartOrReuse(ctx context.Context, documentID, userID, jobDescr
 		Model:           s.Model,
 		Status:          StatusQueued,
 		CreatedAt:       time.Now().UTC(),
+	}
+
+	if useCredit {
+		repo, ok := s.Repo.(*PGRepo)
+		if !ok || !repo.DurableJobs() || s.JobQueue == nil {
+			return Analysis{}, false, ErrCreditsUnavailable
+		}
+		a, created, err := repo.getOrCreateForDocument(ctx, analysis, allowRetry, nil, true)
+		if err != nil {
+			return a, false, err
+		}
+		return s.acceptedDurableAnalysis(ctx, a), created, nil
 	}
 
 	allowCreate := func() error {

@@ -49,7 +49,8 @@ func (r *PGRepo) RecoveryIDs(ctx context.Context, limit int) ([]string, error) {
  WHERE (a.status IN ('completed','failed') AND EXISTS(SELECT 1 FROM analysis_usage_reservations u WHERE u.analysis_id=a.id AND u.state='reserved'))
  OR (a.deleted_at IS NOT NULL AND a.status IN ('queued','processing')) OR (a.status='processing' AND COALESCE(a.started_at,a.created_at)<now()-interval '20 minutes')
  OR (a.status='queued' AND (a.created_at<now()-interval '1 hour' OR
- (EXISTS(SELECT 1 FROM analysis_usage_reservations u WHERE u.analysis_id=a.id AND u.state='reserved')
+ ((EXISTS(SELECT 1 FROM analysis_usage_reservations u WHERE u.analysis_id=a.id AND u.state='reserved')
+ OR EXISTS(SELECT 1 FROM review_credit_uses u WHERE u.analysis_id=a.id AND u.released_at IS NULL))
  AND (d.analysis_id IS NULL OR (d.next_attempt_at<=now() AND (d.claim_until IS NULL OR d.claim_until<=now()) AND d.attempts<8)))))
  ORDER BY a.created_at,a.id LIMIT $1`, limit)
 	if err != nil {

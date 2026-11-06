@@ -3,13 +3,18 @@ package analyses_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"resume-backend/internal/analyses"
+	"resume-backend/internal/documents"
+	"resume-backend/internal/payments"
 	"resume-backend/internal/queue"
 	"resume-backend/internal/usage"
 	"strings"
@@ -463,5 +468,98 @@ func TestPGJobProcessingClaimCannotBeReusedAfterStatusReset(t *testing.T) {
 	}
 	if ok, err := repo.ClaimProcessing(ctx, a.ID, time.Now()); err != nil || ok {
 		t.Fatalf("claim reused: %v %v", ok, err)
+	}
+}
+
+func TestPGPaidReviewCreditsBypassQuotaAndReturnOnFailure(t *testing.T) {
+	svc, _, q, db, doc := recoveryService(t)
+	ctx := context.Background()
+	if _, err := svc.Usage.Consume(ctx, "user", usage.FreeUserMonthlyAnalysisLimit); err != nil {
+		t.Fatal(err)
+	}
+	target := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO review_credit_orders(id,user_id) VALUES($1,'user')`, target); err != nil {
+		t.Fatal(err)
+	}
+	payRepo := &payments.PGRepo{DB: db}
+	if err := payRepo.Create(ctx, payments.Payment{ID: uuid.NewString(), AnalysisID: target, UserID: "user", Status: payments.StatusCreated, RazorpayOrderID: "credit-order", Currency: "INR", AmountMinor: 16900, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	h := analyses.NewHandler(svc, &documents.PGRepo{DB: db})
+	h.Unlocks = &payments.Service{Repo: payRepo, Enabled: true, KeyID: "test", KeySecret: "test"}
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("userId", "user"); c.Next() })
+	h.RegisterRoutes(router.Group(""))
+	run := func(jd string) (int, string) {
+		body, _ := json.Marshal(map[string]any{"jobDescription": strings.Repeat(jd, 320), "mode": "JOB_MATCH", "useReviewCredit": true})
+		req := httptest.NewRequest("POST", "/documents/"+doc+"/analyze", strings.NewReader(string(body)))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		var reply struct {
+			AnalysisID string `json:"analysisId"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &reply)
+		if w.Code != 202 && w.Code != 409 {
+			t.Fatalf("unexpected status %d: %s", w.Code, w.Body.String())
+		}
+		return w.Code, reply.AnalysisID
+	}
+	if code, _ := run("a"); code != 409 {
+		t.Fatal("unpaid credit admitted")
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := payRepo.MarkPaidAndUnlock(ctx, "credit-order", "credit-capture"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if unlocked, err := payRepo.IsUnlocked(ctx, "user", target); err != nil || unlocked {
+		t.Fatalf("credit purchase unlocked an unrelated target: %v %v", unlocked, err)
+	}
+	code, first := run("a")
+	if code != 202 || first == "" {
+		t.Fatal("paid review was not admitted")
+	}
+	if retry, same := run("a"); retry != 202 || same != first || q.calls.Load() != 1 {
+		t.Fatalf("retry did not reuse paid review: %d %s", retry, same)
+	}
+	if code, _ := run("b"); code != 409 {
+		t.Fatal("one credit funded two active reviews")
+	}
+	assertUsage(t, svc, usage.FreeUserMonthlyAnalysisLimit)
+	if _, err := db.Exec(`UPDATE analyses SET status='failed' WHERE id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	code, second := run("b")
+	if code != 202 || second == "" || first == second {
+		t.Fatal("failed review did not release the credit")
+	}
+	if unlocked, err := payRepo.IsUnlocked(ctx, "user", second); err != nil || !unlocked {
+		t.Fatalf("paid review not unlocked: %v %v", unlocked, err)
+	}
+	if _, err := db.Exec(`UPDATE analyses SET status='failed' WHERE id=$1`, second); err != nil {
+		t.Fatal(err)
+	}
+	preview := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO analyses(id,document_id,user_id,status,mode) VALUES($1,$2,'user','completed','JOB_MATCH')`, preview, doc); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest("POST", "/analyses/"+preview+"/use-review-credit", nil))
+		if w.Code != 204 {
+			t.Fatalf("could not unlock saved preview: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if unlocked, err := payRepo.IsUnlocked(ctx, "user", preview); err != nil || !unlocked {
+		t.Fatalf("saved preview still locked: %v %v", unlocked, err)
+	}
+	if q.calls.Load() != 2 {
+		t.Fatal("unlocking a completed preview dispatched new AI work")
+	}
+	if err := payRepo.MarkRefunded(ctx, "credit-capture"); err != nil {
+		t.Fatal(err)
+	}
+	if unlocked, err := payRepo.IsUnlocked(ctx, "user", preview); err != nil || unlocked {
+		t.Fatalf("refunded credit still grants access: %v %v", unlocked, err)
 	}
 }

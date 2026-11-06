@@ -68,7 +68,7 @@ RETURNING `+paymentColumns, StatusPaid, paymentID, orderID)
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO report_unlocks (user_id, analysis_id, payment_id)
-VALUES ($1, $2, $3)
+SELECT $1, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM review_credit_orders WHERE id=$2 AND user_id=$1)
 ON CONFLICT (user_id, analysis_id) DO NOTHING`, p.UserID, p.AnalysisID, p.ID); err != nil {
 		return Payment{}, err
 	}
@@ -102,6 +102,9 @@ RETURNING id`, StatusRefunded, paymentID).Scan(&id)
 func (r *PGRepo) IsUnlocked(ctx context.Context, userID, analysisID string) (bool, error) {
 	var exists bool
 	err := r.DB.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM report_unlocks WHERE user_id = $1 AND analysis_id = $2)`, userID, analysisID).Scan(&exists)
+SELECT EXISTS (SELECT 1 FROM report_unlocks WHERE user_id = $1 AND analysis_id = $2)
+ OR EXISTS (
+ SELECT 1 FROM review_credit_uses u JOIN payments p ON p.id=u.payment_id
+ WHERE u.user_id=$1 AND u.analysis_id=$2 AND u.released_at IS NULL AND p.status='paid')`, userID, analysisID).Scan(&exists)
 	return exists, err
 }

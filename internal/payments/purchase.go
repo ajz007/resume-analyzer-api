@@ -133,6 +133,10 @@ func (s *Service) RecoverPurchase(ctx context.Context, userID, analysisID string
 		}
 		return PurchaseStatus{State: "paid"}, nil
 	}
+	return s.recoverPurchaseTarget(ctx, userID, analysisID)
+}
+
+func (s *Service) recoverPurchaseTarget(ctx context.Context, userID, analysisID string) (PurchaseStatus, error) {
 	p, err := s.Repo.GetPurchase(ctx, userID, analysisID)
 	if errors.Is(err, ErrNotFound) {
 		return PurchaseStatus{State: "none"}, nil

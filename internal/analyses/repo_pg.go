@@ -35,6 +35,10 @@ func (r *PGRepo) admitWithTx(ctx context.Context, tx *sql.Tx, a Analysis) error 
 
 // GetOrCreateForDocument returns the latest analysis for a document or creates a new one.
 func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, allowRetry bool, allowCreate func() error) (Analysis, bool, error) {
+	return r.getOrCreateForDocument(ctx, analysis, allowRetry, allowCreate, false)
+}
+
+func (r *PGRepo) getOrCreateForDocument(ctx context.Context, analysis Analysis, allowRetry bool, allowCreate func() error, useCredit bool) (Analysis, bool, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Analysis{}, false, err
@@ -56,12 +60,12 @@ func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, 
 	}
 	if err == nil {
 		switch latest.Status {
-		case StatusQueued, StatusProcessing:
-			if err := tx.Commit(); err != nil {
-				return Analysis{}, false, err
+		case StatusQueued, StatusProcessing, StatusCompleted:
+			if useCredit {
+				if err := spendReviewCredit(ctx, tx, latest.UserID, latest.ID); err != nil {
+					return latest, false, err
+				}
 			}
-			return latest, false, nil
-		case StatusCompleted:
 			if err := tx.Commit(); err != nil {
 				return Analysis{}, false, err
 			}
@@ -87,7 +91,14 @@ func (r *PGRepo) GetOrCreateForDocument(ctx context.Context, analysis Analysis, 
 	if err := createWithTx(ctx, tx, analysis); err != nil {
 		return Analysis{}, false, err
 	}
-	if err := r.admitWithTx(ctx, tx, analysis); err != nil {
+	if useCredit {
+		if err := spendReviewCredit(ctx, tx, analysis.UserID, analysis.ID); err != nil {
+			return Analysis{}, false, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO analysis_dispatch(analysis_id,request_id,created_at) VALUES($1,$2,$3)`, analysis.ID, requestIDFromContext(ctx), analysis.CreatedAt); err != nil {
+			return Analysis{}, false, err
+		}
+	} else if err := r.admitWithTx(ctx, tx, analysis); err != nil {
 		return Analysis{}, false, err
 	}
 	if err := tx.Commit(); err != nil {

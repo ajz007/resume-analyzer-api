@@ -121,6 +121,10 @@ func (s *Service) CreateOrder(ctx context.Context, userID, analysisID, currency 
 		return Order{}, ErrAlreadyUnlocked
 	}
 
+	return s.createPurchaseOrder(ctx, userID, analysisID, currency, amount)
+}
+
+func (s *Service) createPurchaseOrder(ctx context.Context, userID, analysisID, currency string, amount int64) (Order, error) {
 	now := time.Now().UTC()
 	p, creator, err := s.Repo.ReservePurchase(ctx, Payment{ID: uuid.NewString(), UserID: userID, AnalysisID: analysisID, AmountMinor: amount, Currency: currency, Status: StatusCreated, CreatedAt: now, UpdatedAt: now})
 	if err != nil {

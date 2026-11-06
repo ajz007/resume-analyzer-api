@@ -1,0 +1,7 @@
+# Paid review credits
+
+Deploy the daily AI spend guard and its migration 0030 before migration 0031. Deploy this API to HTTP and worker before deploying the UI. This uses the existing database, queue and Razorpay configuration. INR price comes from the existing server price setting. Existing per-report checkouts remain recoverable.
+
+One confirmed INR checkout creates one credit. The analyzer can apply a credit without consuming a monthly preview. A completed preview can be unlocked without a new AI call. An interrupted checkout reuses the same checkout reference on the browser, and a confirmed balance is stored on the account. A failed review makes the credit available again. Refunds invalidate the funding payment and revoke access paid for by that credit. Avoid rolling the API back to a version that cannot read paid credit entitlements while the feature is active.
+
+Measure free previews through committed analysis usage reservations. A paid credit purchase is a paid payment joined to a review_credit_orders record by payment target and owner. A spent credit is an active review_credit_uses row joined to a completed analysis and a paid funding payment. Queued and processing uses are reserved. A failed use is available again and is marked released when the credit is assigned again. Legacy direct unlocks are tracked separately through report_unlocks. Never count checkout starts as sales.
