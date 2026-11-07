@@ -324,6 +324,10 @@ func (s *Service) finishReviewAnswer(ctx context.Context, analysis Analysis, sou
 		}
 	} else {
 		state.Answers = append(state.Answers, answer)
+		// Save the proposal and its initial selection together so it requires opt-in.
+		if answer.Edit != nil {
+			state.ExcludedIDs = append(state.ExcludedIDs, answer.Edit.ID)
+		}
 	}
 	if saveErr := repo.CompareAndSwapReview(finishCtx, analysis.ID, analysis.UserID, previous, state); saveErr != nil {
 		return state, saveErr

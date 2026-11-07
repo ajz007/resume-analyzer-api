@@ -63,6 +63,14 @@ func TestAnswerReviewAddsOnlyDeltaAndPreservesOriginalChoices(t *testing.T) {
 		t.Fatalf("unexpected state: %+v", state)
 	}
 	saved, _ := svc.Repo.GetByID(context.Background(), original.ID)
+	persisted, err := reviewState(saved.Result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.ExcludedIDs) != 2 || persisted.ExcludedIDs[0] != "failover" ||
+		persisted.Answers[0].Edit == nil || persisted.ExcludedIDs[1] != persisted.Answers[0].Edit.ID {
+		t.Fatalf("new proposal must start unselected alongside the earlier choice: %+v", persisted)
+	}
 	before, _ := json.Marshal(original.Result["report"])
 	after, _ := json.Marshal(saved.Result["report"])
 	if string(before) != string(after) {
